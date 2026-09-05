@@ -8,6 +8,7 @@ import {
 import { forEachConcurrent } from "../lib/concurrent";
 import { buildUnifiedFile, type UnifiedFileDiff } from "../lib/unifiedDiff";
 import { UnifiedDiffView, type UnifiedDiffFileModel } from "./UnifiedDiffView";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   cwd: string;
@@ -24,6 +25,7 @@ type LoadedDiff = {
 const DIFF_LOAD_CONCURRENCY = 4;
 
 export function CommitDiff({ cwd, sha }: Props) {
+  const { t } = useI18n();
   const [files, setFiles] = useState<GitChangedFile[] | null>(null);
   const [diffs, setDiffs] = useState<Map<string, LoadedDiff>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +140,7 @@ export function CommitDiff({ cwd, sha }: Props) {
   if (!cwd || cwd === "~") {
     return (
       <p className="grid h-full place-items-center text-[13px] text-content/45">
-        No project folder
+        {t("sidebar.noProjectFolder")}
       </p>
     );
   }
@@ -146,7 +148,7 @@ export function CommitDiff({ cwd, sha }: Props) {
     return (
       <div className="grid h-full place-items-center p-6 text-center">
         <AlertCircle className="mx-auto mb-3 size-5 text-red-400" />
-        <p className="text-[13px] text-content">Couldn’t load commit</p>
+        <p className="text-[13px] text-content">{t("git.loadCommitError")}</p>
         <p className="mt-1 text-[12px] text-content/50">{error}</p>
       </div>
     );

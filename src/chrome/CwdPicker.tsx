@@ -18,6 +18,7 @@ import { LAYER } from "../lib/layers";
 import { Popover } from "./Popover";
 import { ProjectLogoIcon } from "./ProjectLogoIcon";
 import { MOD } from "../lib/platform";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   cwd: string;
@@ -63,6 +64,7 @@ export function CwdPicker({
   onNewTerminal,
   onClose,
 }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -188,7 +190,7 @@ export function CwdPicker({
       <button
         type="button"
         title={cwd}
-        aria-label={`Project ${label}`}
+        aria-label={t("cwdPicker.projectLabel", { name: label })}
         aria-expanded={open}
         aria-haspopup="menu"
         disabled={!enabled}
@@ -240,7 +242,7 @@ export function CwdPicker({
           ignore={SELF}
           onDismiss={(reason) => dismiss(reason === "escape")}
           role="menu"
-          aria-label="Project picker"
+          aria-label={t("cwdPicker.title")}
           data-cwd-picker
           className="flex flex-col overflow-hidden"
         >
@@ -251,7 +253,7 @@ export function CwdPicker({
             {inProject ? (
               <>
                 <p className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-widest text-content/50">
-                  Current project
+                  {t("cwdPicker.currentProject")}
                 </p>
                 <div className="px-2.5 py-1.5 text-content/50">
                   <p className="truncate text-[13px] text-content">
@@ -266,7 +268,7 @@ export function CwdPicker({
             {previewRecents.length > 0 ? (
               <>
                 <p className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-widest text-content/50">
-                  Recent projects
+                  {t("cwdPicker.recentProjects")}
                 </p>
                 {previewRecents.map((item, index) => (
                   <button
@@ -319,7 +321,7 @@ export function CwdPicker({
                     : "text-content/80 hover:bg-content/5"
                 }`}
               >
-                <span className="text-[13px]">More Projects</span>
+                <span className="text-[13px]">{t("cwdPicker.moreRecents")}</span>
                 <ChevronRight
                   className="size-3.5 shrink-0"
                   strokeWidth={1.75}
@@ -344,7 +346,7 @@ export function CwdPicker({
                     : "text-content/80 hover:bg-content/5"
                 }`}
               >
-                <span className="text-[13px]">New terminal</span>
+                <span className="text-[13px]">{t("cwdPicker.newTerminal")}</span>
                 <span className="shrink-0 font-mono text-[11px] text-content/45">
                   {MOD}`
                 </span>
@@ -362,7 +364,7 @@ export function CwdPicker({
           maxHeight={SUBMENU_MAX_HEIGHT}
           layer={LAYER.submenu}
           role="menu"
-          aria-label="More projects"
+          aria-label={t("cwdPicker.moreRecents")}
           data-cwd-submenu
           className="overflow-y-auto overscroll-none py-1"
           onMouseEnter={openMore}

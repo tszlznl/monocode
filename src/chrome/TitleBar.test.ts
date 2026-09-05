@@ -76,6 +76,12 @@ describe("tabCopy", () => {
     expect(copy.headline).toBe("New session");
     expect(copy.meta).toBe("");
   });
+
+  it("labels an empty tab in Chinese when requested", () => {
+    const copy = tabCopy(tab({ project: "agent-terminal" }), "zh-CN");
+    expect(copy.headline).toBe("新建会话");
+    expect(copy.meta).toBe("");
+  });
 });
 
 describe("tabStripOverflow", () => {

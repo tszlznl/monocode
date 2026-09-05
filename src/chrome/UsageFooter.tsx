@@ -24,6 +24,7 @@ import {
   runningTerminalChipLabel,
   type RunningTerminal,
 } from "../lib/terminalTab";
+import { useI18n } from "../lib/i18n";
 
 const CLOCK_MS = 30_000;
 
@@ -32,18 +33,19 @@ export type UsageFooterSession = {
 };
 
 export function UsageFooter({
-  providers,
+  providers = [],
   session,
   terminals = [],
   terminalOpen = false,
   onToggleTerminal,
 }: {
-  providers: RateLimitProvider[];
+  providers?: RateLimitProvider[];
   session?: UsageFooterSession;
   terminals?: RunningTerminal[];
   terminalOpen?: boolean;
   onToggleTerminal?: (fileId: string) => void;
 }) {
+  const { t } = useI18n();
   const wantClaude = providers.includes("claude");
   const wantCodex = providers.includes("codex");
   const [claude, setClaude] = useState<ProviderRateLimits>(() =>
@@ -153,8 +155,8 @@ export function UsageFooter({
             <button
               type="button"
               className="grid size-5 shrink-0 place-items-center rounded text-content/40 hover:bg-content/10 hover:text-content disabled:opacity-50"
-              aria-label="Refresh usage"
-              title="Refresh usage"
+              aria-label={t("usage.refresh")}
+              title={t("usage.refresh")}
               disabled={refreshing}
               onClick={() => void refresh(true)}
             >
@@ -202,6 +204,7 @@ function RunningTerminalChip({
   open: boolean;
   onToggle?: (fileId: string) => void;
 }) {
+  const { t } = useI18n();
   const root = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const label = runningTerminalChipLabel(terminals);
@@ -256,7 +259,7 @@ function RunningTerminalChip({
           autoFocus
           onDismiss={() => setMenuOpen(false)}
           role="menu"
-          aria-label="Running terminals"
+          aria-label={t("terminal.runningTerminals")}
           className="min-w-[12rem] p-1"
         >
           {terminals.map((terminal) => (

@@ -8,6 +8,7 @@ import {
   sessionDisplayTitle,
   type Session,
 } from "../lib/session";
+import { useI18n } from "../lib/i18n";
 import { HarnessIcon } from "./HarnessIcon";
 
 type Notice = PendingApprovalNotice & { session: Session };
@@ -53,6 +54,7 @@ function ApprovalToastCard({
   onFocusSession: (sessionId: string) => void;
   onApproval: Props["onApproval"];
 }) {
+  const { t } = useI18n();
   const { session, label, requestId } = notice;
   const title = sessionDisplayTitle(session.title, session.harness);
   const harness = HARNESS_TITLE[session.harness];
@@ -76,7 +78,11 @@ function ApprovalToastCard({
           </span>
           <span className="flex shrink-0 items-center gap-1 text-[11px] text-amber-400">
             <CircleAlert className="size-3.5" strokeWidth={1.75} />
-            <span>{notice.kind === "question" ? "Question" : "Approval"}</span>
+            <span>
+              {notice.kind === "question"
+                ? t("approval.question")
+                : t("approval.approval")}
+            </span>
           </span>
         </span>
         <span className="line-clamp-3 text-[12px] leading-relaxed text-content/70">
@@ -91,14 +97,14 @@ function ApprovalToastCard({
             className="flex-1 rounded-md bg-content px-2.5 py-1 text-[11px] font-medium text-background-base hover:bg-content/80"
             onClick={() => onApproval(session.id, requestId, "allow")}
           >
-            Allow
+            {t("approval.allow")}
           </button>
           <button
             type="button"
             className="flex-1 rounded-md bg-content/10 px-2.5 py-1 text-[11px] font-medium text-content/70 hover:bg-content/20"
             onClick={() => onApproval(session.id, requestId, "deny")}
           >
-            Deny
+            {t("approval.deny")}
           </button>
         </div>
       )}

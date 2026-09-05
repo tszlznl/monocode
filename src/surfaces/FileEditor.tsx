@@ -42,6 +42,7 @@ import { useColorScheme } from "../hooks/useColorScheme";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { isLightScheme } from "../lib/appearance";
 import { formatText } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import {
   basename,
   gitFileDiff,
@@ -109,6 +110,7 @@ export function FileEditor({
   onErrorCountChange,
   onOpenFile,
 }: Props) {
+  const { t } = useI18n();
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
   const [reloadKey, setReloadKey] = useState(0);
@@ -357,7 +359,7 @@ export function FileEditor({
         <div className="max-w-md text-center">
           <AlertCircle className="mx-auto mb-3 size-5 text-red-400" />
           <p className="text-[13px] text-content">
-            Couldn’t open {basename(path)}
+            {t("editor.couldNotOpen", { name: basename(path) })}
           </p>
           <p className="mt-1 text-[12px] leading-5 text-content/50">
             {loadState.message}
@@ -368,7 +370,7 @@ export function FileEditor({
             className="mx-auto mt-4 flex h-7 items-center gap-1.5 rounded-md bg-content/10 px-2.5 text-[12px] text-content hover:bg-content/15"
           >
             <RotateCcw className="size-3" strokeWidth={1.75} />
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -429,15 +431,15 @@ export function FileEditor({
           {relativePath}
         </span>
         {saveState.status === "saving" ? (
-          <span>Saving…</span>
+          <span>{t("editor.saving")}</span>
         ) : saveState.status === "saved" ? (
-          <span>Saved</span>
+          <span>{t("editor.saved")}</span>
         ) : saveState.status === "error" ? (
           <span
             className="max-w-64 truncate text-red-400"
             title={saveState.message}
           >
-            Save failed: {saveState.message}
+            {t("editor.saveFailed", { message: saveState.message })}
           </span>
         ) : null}
       </footer>
@@ -850,18 +852,19 @@ function DiffChunkNav({
   onPrev: () => void;
   onNext: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <header
       className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-content/10 px-3 pr-1"
       role="toolbar"
-      aria-label="Jump between changes"
+      aria-label={t("editor.jumpChanges")}
     >
       <DiffChunkStat additions={additions} deletions={deletions} />
       <div className="flex items-center gap-0.5">
         <button
           type="button"
-          title="Previous change"
-          aria-label="Previous change"
+          title={t("editor.previousChange")}
+          aria-label={t("editor.previousChange")}
           disabled={total === 0 || index <= 0}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onPrev}
@@ -874,8 +877,8 @@ function DiffChunkNav({
         </span>
         <button
           type="button"
-          title="Next change"
-          aria-label="Next change"
+          title={t("editor.nextChange")}
+          aria-label={t("editor.nextChange")}
           disabled={total === 0 || index >= total - 1}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onNext}

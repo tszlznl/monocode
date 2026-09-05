@@ -34,6 +34,8 @@ import { WindowControls } from "./WindowControls";
 import { IS_MAC, MOD } from "../lib/platform";
 import type { RecentProject } from "../lib/recents";
 
+import { useI18n, t, type Language } from "../lib/i18n";
+
 export type Tab = {
   id: string;
   /** Project folder name, e.g. `agent-terminal`. */
@@ -79,13 +81,15 @@ type Props = {
   onSelectProject?: (path: string) => void;
 };
 
-function sessionMeta(tab: Tab): string {
+function sessionMeta(tab: Tab, lang: Language = "en"): string {
   if (tab.more.length === 1) return tab.more[0];
-  if (tab.sessionCount > 1) return `${tab.sessionCount} sessions`;
+  if (tab.sessionCount > 1) {
+    return t("tabs.sessionsCount", { count: tab.sessionCount }, lang);
+  }
   return "";
 }
 
-export function tabCopy(tab: Tab): {
+export function tabCopy(tab: Tab, lang: Language = "en"): {
   headline: string;
   meta: string;
   tooltip: string;
@@ -93,8 +97,8 @@ export function tabCopy(tab: Tab): {
   const project = tab.project.trim() || "~";
   const conversation = tab.title.trim();
   const file = tab.files[0] ?? "";
-  const sessions = sessionMeta(tab);
-  const untitled = "New session";
+  const sessions = sessionMeta(tab, lang);
+  const untitled = t("tabs.newSession", undefined, lang);
 
   let headline: string;
   const metaParts: string[] = [];
@@ -126,7 +130,7 @@ export function tabCopy(tab: Tab): {
   if (conversation) tooltipParts.push(conversation);
   tooltipParts.push(...tab.more);
   if (tab.files.length > 0) tooltipParts.push(tab.files.join(", "));
-  if (tab.dirty) tooltipParts.push("Unsaved changes");
+  if (tab.dirty) tooltipParts.push(t("tabs.unsavedChanges", undefined, lang));
 
   return { headline, meta, tooltip: tooltipParts.join(" · ") };
 }
@@ -209,8 +213,9 @@ function TitleTabItem({
   onClose: (id: string) => void;
   itemRef?: (el: HTMLDivElement | null) => void;
 }) {
+  const { language, t } = useI18n();
   const dragging = canDrag && sortable.draggingId === tab.id;
-  const { headline, meta, tooltip } = tabCopy(tab);
+  const { headline, meta, tooltip } = tabCopy(tab, language);
   const fileIcon = tab.files[0];
   const showStart =
     canDrag &&
@@ -297,8 +302,8 @@ function TitleTabItem({
             {tab.dirty ? (
               <span
                 className="size-1.5 shrink-0 rounded-full bg-content/70"
-                title="Unsaved changes"
-                aria-label="Unsaved changes"
+                title={t("tabs.unsavedChanges")}
+                aria-label={t("tabs.unsavedChanges")}
               />
             ) : null}
           </span>
@@ -312,8 +317,8 @@ function TitleTabItem({
       {closable ? (
         <button
           type="button"
-          title="Close Tab"
-          aria-label={`Close ${headline}`}
+          title={t("tabs.closeTab")}
+          aria-label={t("tabs.closeNamed", { name: headline })}
           data-no-drag
           data-tauri-drag-region="false"
           onPointerDown={(event) => event.stopPropagation()}
@@ -336,8 +341,10 @@ function TabStripChevron({
 }: {
   side: "left" | "right";
   onClick: () => void;
+  lang?: Language;
 }) {
-  const label = side === "left" ? "Scroll tabs left" : "Scroll tabs right";
+  const { t } = useI18n();
+  const label = side === "left" ? t("tabs.scrollLeft") : t("tabs.scrollRight");
   const Icon = side === "left" ? ChevronLeft : ChevronRight;
   return (
     <button
@@ -399,13 +406,14 @@ export function IconButton({
 }
 
 export function DevModeLabel() {
+  const { t } = useI18n();
   if (!import.meta.env.DEV) return null;
   return (
     <span
-      title="Development build"
+      title={t("titleBar.devBuild")}
       className="mr-1 min-w-0 truncate rounded-md bg-skill/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-skill"
     >
-      Development
+      {t("titleBar.development")}
     </span>
   );
 }
@@ -513,6 +521,7 @@ function TitleBarComponent({
   recents = [],
   onSelectProject,
 }: Props) {
+  const { t } = useI18n();
   const tabIds = tabs.map((tab) => tab.id);
   const sortable = useSortable(tabIds, onReorder);
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
@@ -609,21 +618,21 @@ function TitleBarComponent({
     <div className="flex h-full shrink-0 items-stretch">
       <div className="flex items-center gap-0.5 px-2">
         {projectless && railClosed && onOpenInbox ? (
-          <IconButton label="Inbox" onClick={onOpenInbox}>
+          <IconButton label={t("rail.inbox")} onClick={onOpenInbox}>
             <Inbox className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
         {projectless && railClosed && onOpenNotes ? (
-          <IconButton label="Notes" onClick={onOpenNotes}>
+          <IconButton label={t("rail.notes")} onClick={onOpenNotes}>
             <StickyNote className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
         {railClosed && !projectless ? (
           <>
-            <IconButton label={`Go to File (${MOD}P)`} onClick={onGoToFile}>
+            <IconButton label={`${t("rail.search")} (${MOD}P)`} onClick={onGoToFile}>
               <Search className="size-3.5" strokeWidth={1.75} />
             </IconButton>
-            <IconButton label={`New session (${MOD}T)`} onClick={onNew}>
+            <IconButton label={`${t("tabs.newSession")} (${MOD}T)`} onClick={onNew}>
               <Plus className="size-3.5" strokeWidth={1.75} />
             </IconButton>
           </>
@@ -631,7 +640,9 @@ function TitleBarComponent({
         {!projectless && (onShowTerminal || onNewTerminal) ? (
           <IconButton
             label={
-              projectTerminalActive ? "Terminal" : `New Terminal (${MOD}\`)`
+              projectTerminalActive
+                ? t("tabs.terminal")
+                : `${t("cwdPicker.newTerminal")} (${MOD}\`)`
             }
             accent={projectTerminalActive}
             onClick={
@@ -644,7 +655,7 @@ function TitleBarComponent({
           </IconButton>
         ) : null}
         {!projectRailOpen && !showCurrentProject && onOpenSettings ? (
-          <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>
+          <IconButton label={`${t("common.settings")} (${MOD},)`} onClick={onOpenSettings}>
             <Settings className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
@@ -668,7 +679,7 @@ function TitleBarComponent({
           <div className="w-[78px] shrink-0" />
           <div className="flex shrink-0 items-center px-1.5">
             <IconButton
-              label={`Toggle Sidebar (${MOD}B)`}
+              label={`${t("tabs.toggleSidebar")} (${MOD}B)`}
               onClick={onToggleSidebar}
             >
               <PanelLeft className="size-3.5" strokeWidth={1.75} />
@@ -685,7 +696,7 @@ function TitleBarComponent({
           onNewTerminal={onNewTerminal}
           buttonClassName="flex h-full min-w-0 max-w-64 shrink items-center gap-2 px-6 text-left text-sm font-medium leading-tight"
         >
-          <span className="min-w-0 truncate text-content/50">No project</span>
+          <span className="min-w-0 truncate text-content/50">{t("rail.noProjects")}</span>
         </CwdPicker>
       ) : null}
 

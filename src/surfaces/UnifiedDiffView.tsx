@@ -24,6 +24,7 @@ import type { ColorScheme } from "../lib/appearance";
 import { basename } from "../lib/fs";
 import { highlightDiffFile, type SyntaxToken } from "./syntaxTokens";
 import { DiffCommentComposer } from "./DiffCommentComposer";
+import { useI18n } from "../lib/i18n";
 import {
   expandFold,
   type FoldReveal,
@@ -161,13 +162,18 @@ export function UnifiedDiffView({
     else fileRefs.current.delete(path);
   }, []);
 
+  const { t } = useI18n();
+
   if (files.length === 0) {
     return (
-      <p className="px-4 py-6 text-[13px] text-content/45">No file changes</p>
+      <p className="px-4 py-6 text-[13px] text-content/45">{t("inbox.noFileChanges")}</p>
     );
   }
 
-  const fileLabel = files.length === 1 ? "1 file" : `${files.length} files`;
+  const fileLabel =
+    files.length === 1
+      ? t("diff.singleFile")
+      : t("diff.fileCount", { count: files.length });
   const additions =
     totals?.additions ?? files.reduce((sum, file) => sum + file.additions, 0);
   const deletions =
@@ -189,8 +195,8 @@ export function UnifiedDiffView({
         <span className="ml-auto flex items-center gap-0.5">
           <button
             type="button"
-            title="Expand all files"
-            aria-label="Expand all files"
+            title={t("diff.expandAll")}
+            aria-label={t("diff.expandAll")}
             onClick={() => setOpen(new Set(files.map((file) => file.id)))}
             className="grid size-7 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content"
           >
@@ -198,8 +204,8 @@ export function UnifiedDiffView({
           </button>
           <button
             type="button"
-            title="Collapse all files"
-            aria-label="Collapse all files"
+            title={t("diff.collapseAll")}
+            aria-label={t("diff.collapseAll")}
             disabled={open.size === 0}
             onClick={() => setOpen(new Set())}
             className="grid size-7 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content disabled:opacity-40"
@@ -218,8 +224,7 @@ export function UnifiedDiffView({
       >
         {truncated ? (
           <p className="px-3 py-3 text-[12px] text-content/45">
-            Diff is too large to display in full. File list is shown without
-            patches.
+            {t("diff.tooLarge")}
           </p>
         ) : null}
         <div
@@ -279,7 +284,6 @@ type FileSectionProps = {
 const FileSection = memo(function FileSection({
   file,
   expanded,
-  focused,
   busy,
   reveals,
   fileLayout,
@@ -292,6 +296,7 @@ const FileSection = memo(function FileSection({
   onStageHunk,
   bindRef,
 }: FileSectionProps) {
+  const { t } = useI18n();
   const Chevron = expanded ? ChevronDown : ChevronRight;
   const name = basename(file.path);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -311,7 +316,7 @@ const FileSection = memo(function FileSection({
     };
   }, [colorScheme, expanded, file, near]);
 
-  const setSection = useCallback(
+  const bindSectionRef = useCallback(
     (node: HTMLElement | null) => {
       sectionRef.current = node;
       bindRef(file.path, node);
@@ -321,43 +326,35 @@ const FileSection = memo(function FileSection({
 
   useLayoutEffect(() => {
     if (!expanded) return;
+    const scroller = scrollerRef.current;
     const section = sectionRef.current;
-    if (!section) return;
-    const root = scrollerRef.current ?? verticalScrollParent(section);
-    setNear(isNearViewport(section, root, 800));
-  }, [expanded, scrollerRef, file.id]);
-
-  useEffect(() => {
-    const section = sectionRef.current;
-    if (!section || !expanded) return;
-    const root = scrollerRef.current ?? verticalScrollParent(section);
+    if (!scroller || !section) return;
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        const next = entry.isIntersecting;
-        setNear((current) => (current === next ? current : next));
-      },
-      { root, rootMargin: "800px 0px", threshold: 0 },
+      ([entry]) => setNear(entry.isIntersecting),
+      { root: scroller, rootMargin: "400px" },
     );
     observer.observe(section);
     return () => observer.disconnect();
-  }, [expanded, scrollerRef]);
+  }, [expanded, scrollerRef, file.id]);
 
   return (
     <section
-      ref={setSection}
+      ref={bindSectionRef}
+      id={`diff-file-${file.id}`}
+      tabIndex={-1}
       data-diff-file={file.path}
-      className={`${
+      className={
         fileLayout === "cards"
-          ? "overflow-hidden rounded-md border border-content/10"
-          : ""
-      } ${focused ? "bg-content/[0.03]" : ""}`}
+          ? "rounded-md border border-content/10 bg-content/2 outline-none focus-visible:ring-1 focus-visible:ring-content/20"
+          : "border-b border-content/10 bg-content/2 outline-none focus-visible:ring-1 focus-visible:ring-content/20"
+      }
     >
       <header
-        className={`${
+        className={`flex h-8 items-center gap-1.5 border-content/10 bg-content/5 px-2 select-none ${
           fileLayout === "stacked" ? "sticky top-0 z-30 backdrop-blur-xl" : ""
-        } flex items-center gap-2 bg-content/2 px-3 py-1.5 ${
+        } ${
           fileLayout === "stacked" || expanded
-            ? "border-b border-content/10"
+            ? "border-b"
             : ""
         }`}
       >
@@ -365,10 +362,10 @@ const FileSection = memo(function FileSection({
           type="button"
           aria-expanded={expanded}
           onClick={() => onToggle(file.id)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
         >
           <Chevron
-            className="size-3.5 shrink-0 text-content/45"
+            className="size-3.5 shrink-0 text-content/40"
             strokeWidth={1.75}
           />
           <FileTypeIcon name={name} isDir={false} size={16} />
@@ -382,7 +379,7 @@ const FileSection = memo(function FileSection({
         </button>
         {file.canDiscard && onDiscardFile ? (
           <IconButton
-            title="Discard file"
+            title={t("diff.discardFile")}
             disabled={busy}
             onClick={() => onDiscardFile(file.id)}
           >
@@ -392,8 +389,8 @@ const FileSection = memo(function FileSection({
         {file.canStage && onStageFile ? (
           <button
             type="button"
-            title="Stage file"
-            aria-label="Stage file"
+            title={t("diff.stageFile")}
+            aria-label={t("diff.stageFile")}
             disabled={busy}
             onClick={() => onStageFile(file.id)}
             className="grid size-4 place-items-center rounded-[3px] bg-content text-background-base hover:opacity-80 disabled:opacity-40"
@@ -485,10 +482,11 @@ function FileBody({
   onReveal: (foldId: string, direction: "up" | "down" | "all") => void;
   onStageHunk?: (id: string, pos: number) => void;
 }) {
-  if (file.binary) return <EmptyBody>Binary file changed</EmptyBody>;
-  if (file.tooLarge) return <EmptyBody>Diff is too large to display</EmptyBody>;
+  const { t } = useI18n();
+  if (file.binary) return <EmptyBody>{t("binary.changed")}</EmptyBody>;
+  if (file.tooLarge) return <EmptyBody>{t("diff.tooLargeDisplay")}</EmptyBody>;
   if (file.emptyMessage) return <EmptyBody>{file.emptyMessage}</EmptyBody>;
-  if (file.blocks.length === 0) return <EmptyBody>No textual diff</EmptyBody>;
+  if (file.blocks.length === 0) return <EmptyBody>{t("inbox.noTextualDiff")}</EmptyBody>;
 
   return (
     <VirtualRows
@@ -841,6 +839,7 @@ function FoldBar({
   hidden: number;
   onReveal: (direction: "up" | "down" | "all") => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className="flex items-center gap-1 bg-content/8 px-2"
@@ -848,8 +847,8 @@ function FoldBar({
     >
       <button
         type="button"
-        title="Expand upward"
-        aria-label="Expand unmodified lines upward"
+        title={t("diff.expandUpward")}
+        aria-label={t("diff.expandUpwardLabel")}
         onClick={() => onReveal("up")}
         className="grid size-5 place-items-center rounded text-content/40 hover:bg-content/10 hover:text-content"
       >
@@ -857,8 +856,8 @@ function FoldBar({
       </button>
       <button
         type="button"
-        title="Expand downward"
-        aria-label="Expand unmodified lines downward"
+        title={t("diff.expandDownward")}
+        aria-label={t("diff.expandDownwardLabel")}
         onClick={() => onReveal("down")}
         className="grid size-5 place-items-center rounded text-content/40 hover:bg-content/10 hover:text-content"
       >
@@ -869,7 +868,7 @@ function FoldBar({
         onClick={() => onReveal("all")}
         className="min-w-0 flex-1 py-1 text-left font-mono text-[11px] text-content/45 hover:text-content/70"
       >
-        {hidden} unmodified {hidden === 1 ? "line" : "lines"}
+        {t("diff.unmodifiedLines", { count: hidden })}
       </button>
     </div>
   );
@@ -892,6 +891,7 @@ const DiffLineRow = memo(function DiffLineRow({
   onStage?: () => void;
   onComment?: (anchor: DOMRect) => void;
 }) {
+  const { t } = useI18n();
   if (line.kind === "hunk") {
     return (
       <div className="bg-content/5" style={{ height: UNIFIED_HUNK_PX }}>
@@ -935,8 +935,8 @@ const DiffLineRow = memo(function DiffLineRow({
         {onComment ? (
           <button
             type="button"
-            title={`Comment on line ${number ?? ""}`.trim()}
-            aria-label={`Comment on line ${number ?? ""}`.trim()}
+            title={t("diff.commentOnLine", { line: number ?? "" })}
+            aria-label={t("diff.commentOnLine", { line: number ?? "" })}
             onClick={(event) =>
               onComment(event.currentTarget.getBoundingClientRect())
             }
@@ -952,8 +952,8 @@ const DiffLineRow = memo(function DiffLineRow({
         {onStage ? (
           <button
             type="button"
-            title="Stage hunk"
-            aria-label="Stage hunk"
+            title={t("diff.stageHunk")}
+            aria-label={t("diff.stageHunk")}
             onClick={onStage}
             className={`absolute top-0.5 left-full z-10 ml-0.5 grid size-4 place-items-center rounded-[3px] bg-white text-[11px] font-bold text-black ${
               hovered ? "opacity-100" : "pointer-events-none opacity-0"
@@ -1064,18 +1064,6 @@ function verticalScrollParent(
     current = current.parentElement;
   }
   return null;
-}
-
-function isNearViewport(
-  section: HTMLElement,
-  root: HTMLElement | null,
-  margin: number,
-) {
-  const bounds = section.getBoundingClientRect();
-  const view = root
-    ? root.getBoundingClientRect()
-    : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-  return bounds.bottom + margin > view.top && bounds.top - margin < view.bottom;
 }
 
 function initiallyOpenFiles(

@@ -10,8 +10,10 @@ import {
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import {
   SETTINGS_SECTIONS,
+  settingsSectionLabel,
   type SettingsSectionId,
 } from "../lib/settings";
+import { useI18n } from "../lib/i18n";
 
 const SECTION_ICONS: Record<SettingsSectionId, IconComponent> = {
   general: SlidersHorizontal,
@@ -29,19 +31,20 @@ type Props = {
 
 /** Body of the project rail while settings are open. */
 export function SettingsNav({ section, onSelect, onClose }: Props) {
+  const { t } = useI18n();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
 
   return (
     <>
       <div
         ref={lockOverscroll}
-        aria-label="Settings"
+        aria-label={t("common.settings")}
         className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto overscroll-none px-2 pb-2"
       >
         {SETTINGS_SECTIONS.map((item) => (
           <NavRow
             key={item.id}
-            label={item.label}
+            label={settingsSectionLabel(item.id)}
             icon={SECTION_ICONS[item.id]}
             active={item.id === section}
             onClick={() => onSelect(item.id)}
@@ -49,7 +52,7 @@ export function SettingsNav({ section, onSelect, onClose }: Props) {
         ))}
       </div>
       <div className="flex shrink-0 flex-col gap-px p-2">
-        <NavRow label="Back" icon={ArrowLeft} onClick={onClose} />
+        <NavRow label={t("common.back")} icon={ArrowLeft} onClick={onClose} />
       </div>
     </>
   );

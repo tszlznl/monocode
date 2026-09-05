@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 import { normalizeHex } from "../lib/colorUtils";
+import { useI18n } from "../lib/i18n";
 import { clearProjectLogo, pickAndSetProjectLogo } from "../lib/projectLogos";
 import { PROJECT_MASCOTS, projectMascot } from "../lib/projectMascots";
 import { TAB_GROUP_COLORS } from "../lib/tabGroups";
@@ -77,37 +78,6 @@ type MenuItem = {
   icon: IconComponent;
 };
 
-const ITEMS: MenuItem[] = [
-  {
-    id: "new-tab",
-    label: "New tab in group",
-    shortcut: `${MOD}T`,
-    icon: SquarePlus,
-  },
-  {
-    id: "new-window",
-    label: "Move group to new window",
-    icon: AppWindow,
-  },
-  {
-    id: "close-group",
-    label: "Close group",
-    shortcut: `${MOD}W`,
-    icon: X,
-  },
-  {
-    id: "ungroup",
-    label: "Ungroup",
-    icon: Ungroup,
-  },
-  {
-    id: "delete-group",
-    label: "Delete group",
-    danger: true,
-    icon: Trash2,
-  },
-];
-
 export function TabGroupMenu({
   x,
   y,
@@ -131,9 +101,41 @@ export function TabGroupMenu({
   extraItems,
   onExtraPick,
 }: Props) {
+  const { t } = useI18n();
   const input = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(label);
   const [customPickerOpen, setCustomPickerOpen] = useState(false);
+
+  const items: MenuItem[] = [
+    {
+      id: "new-tab",
+      label: t("tabGroup.newTab"),
+      shortcut: `${MOD}T`,
+      icon: SquarePlus,
+    },
+    {
+      id: "new-window",
+      label: t("tabGroup.newWindow"),
+      icon: AppWindow,
+    },
+    {
+      id: "close-group",
+      label: t("tabGroup.closeGroup"),
+      shortcut: `${MOD}W`,
+      icon: X,
+    },
+    {
+      id: "ungroup",
+      label: t("tabGroup.ungroup"),
+      icon: Ungroup,
+    },
+    {
+      id: "delete-group",
+      label: t("tabGroup.deleteGroup"),
+      danger: true,
+      icon: Trash2,
+    },
+  ];
 
   useEffect(() => {
     input.current?.focus();
@@ -162,7 +164,7 @@ export function TabGroupMenu({
       onDismiss={onClose}
       role="menu"
       tabIndex={-1}
-      aria-label="Tab group actions"
+      aria-label={t("tabGroup.actions")}
       onKeyDown={onMenuKey}
       onContextMenu={(e) => e.preventDefault()}
       className="overflow-y-auto overscroll-none p-2"
@@ -172,7 +174,7 @@ export function TabGroupMenu({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onBlur={commitName}
-        aria-label="Group name"
+        aria-label={t("tabGroup.name")}
         className="mb-2 w-full rounded-lg border border-content/10 bg-content/5 px-2.5 py-1.5 text-[13px] text-content outline-none ring-accent/40 focus:ring-1"
       />
 
@@ -180,8 +182,8 @@ export function TabGroupMenu({
         <div className="mb-2 flex items-center gap-2 px-0.5">
           <button
             type="button"
-            title={logoPath ? "Change project logo" : "Add project logo"}
-            aria-label={logoPath ? "Change project logo" : "Add project logo"}
+            title={logoPath ? t("tabGroup.changeLogo") : t("tabGroup.addLogo")}
+            aria-label={logoPath ? t("tabGroup.changeLogo") : t("tabGroup.addLogo")}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               void (async () => {
@@ -206,16 +208,16 @@ export function TabGroupMenu({
             />
           </button>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] text-content/50">Project logo</p>
+            <p className="text-[11px] text-content/50">{t("tabGroup.logo")}</p>
             <p className="truncate text-[12px] text-content/70">
-              {logoPath ? "Shown in tabs and composer" : "Optional — replaces folder icon"}
+              {logoPath ? t("tabGroup.logoDesc") : t("tabGroup.logoDescEmpty")}
             </p>
           </div>
           {logoPath ? (
             <button
               type="button"
-              title="Remove project logo"
-              aria-label="Remove project logo"
+              title={t("tabGroup.removeLogo")}
+              aria-label={t("tabGroup.removeLogo")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 void clearProjectLogo(logoProject).then(onLogoChange);
@@ -250,7 +252,7 @@ export function TabGroupMenu({
       ) : null}
 
       <div className="mb-2 px-0.5">
-        <p className="mb-1 text-[11px] text-content/50">Mascot</p>
+        <p className="mb-1 text-[11px] text-content/50">{t("tabGroup.mascot")}</p>
         <div className="flex items-center justify-between gap-1">
           {PROJECT_MASCOTS.map((mascot) => (
             <MascotSwatch
@@ -273,19 +275,19 @@ export function TabGroupMenu({
         <>
           <div className="my-1 h-px bg-content/10" />
 
-          {ITEMS.slice(0, 2).map((item) => (
+          {items.slice(0, 2).map((item) => (
             <MenuRow key={item.id} item={item} onPick={() => onPick(item.id as TabGroupMenuAction)} />
           ))}
 
           <div className="my-1 h-px bg-content/10" />
 
-          {ITEMS.slice(2, 4).map((item) => (
+          {items.slice(2, 4).map((item) => (
             <MenuRow key={item.id} item={item} onPick={() => onPick(item.id as TabGroupMenuAction)} />
           ))}
 
           <div className="my-1 h-px bg-content/10" />
 
-          {ITEMS.slice(4).map((item) => (
+          {items.slice(4).map((item) => (
             <MenuRow key={item.id} item={item} onPick={() => onPick(item.id as TabGroupMenuAction)} />
           ))}
         </>
@@ -325,11 +327,12 @@ function MascotSwatch({
   onPick: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       title={title}
-      aria-label={`Mascot ${title}`}
+      aria-label={`${t("tabGroup.mascot")} ${title}`}
       aria-pressed={selected}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onPick}

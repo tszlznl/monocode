@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MessageSquarePlus, X } from "../chrome/icons";
 import { Popover, type PopoverAnchor } from "../chrome/Popover";
 import { diffCommentLocation, formatDiffComment } from "../lib/diffComment";
+import { useI18n } from "../lib/i18n";
 import { MOD } from "../lib/platform";
 import { requestAddToChat } from "../lib/quoteDraft";
 import type { UnifiedLine } from "../lib/unifiedDiff";
@@ -20,6 +21,7 @@ export function DiffCommentComposer({
   target: DiffCommentComposerTarget;
   onDismiss: () => void;
 }) {
+  const { t } = useI18n();
   const [comment, setComment] = useState("");
   const location = diffCommentLocation({ path, line: target.line });
   const addToChat = () => {
@@ -38,7 +40,7 @@ export function DiffCommentComposer({
       width={320}
       onDismiss={onDismiss}
       role="dialog"
-      aria-label={`Comment on ${location}`}
+      aria-label={t("diff.commentOnLocation", { location })}
       className="p-2"
     >
       <form
@@ -56,8 +58,8 @@ export function DiffCommentComposer({
           </span>
           <button
             type="button"
-            title="Cancel comment"
-            aria-label="Cancel comment"
+            title={t("diff.cancelComment")}
+            aria-label={t("diff.cancelComment")}
             onClick={onDismiss}
             className="grid size-5 shrink-0 place-items-center rounded text-content/45 hover:bg-content/10 hover:text-content"
           >
@@ -79,18 +81,20 @@ export function DiffCommentComposer({
               addToChat();
             }
           }}
-          placeholder="Leave a comment…"
+          placeholder={t("diff.leaveComment")}
           className="max-h-40 min-h-18 w-full resize-y rounded-lg border border-content/10 bg-background-base/70 px-2.5 py-2 text-[13px] leading-5 text-content outline-none placeholder:text-content/35 focus:border-content/20"
         />
         <div className="mt-2 flex items-center justify-between gap-3">
-          <span className="text-[10px] text-content/35">{MOD}↩ to add</span>
+          <span className="text-[10px] text-content/35">
+            {t("diff.shortcutToAdd", { shortcut: `${MOD}↩` })}
+          </span>
           <button
             type="submit"
             disabled={!comment.trim()}
             className="inline-flex h-7 items-center gap-1.5 rounded-md bg-content px-2.5 text-[12px] font-medium text-background-base hover:opacity-80 disabled:cursor-default disabled:opacity-40"
           >
             <MessageSquarePlus className="size-3.5" strokeWidth={1.75} />
-            Add to chat
+            {t("diff.addToChat")}
           </button>
         </div>
       </form>

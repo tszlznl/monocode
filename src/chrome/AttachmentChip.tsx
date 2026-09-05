@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n";
 import { X } from "./icons";
 import { attachmentPreviewSrc } from "../lib/attachments";
 import type { Attachment } from "../lib/session";
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export function AttachmentChip({ attachment, onRemove }: Props) {
+  const { t } = useI18n();
   const preview = attachmentPreviewSrc(attachment);
   const image = attachment.kind === "image" && preview;
 
@@ -38,8 +40,8 @@ export function AttachmentChip({ attachment, onRemove }: Props) {
       {onRemove ? (
         <button
           type="button"
-          title="Remove"
-          aria-label={`Remove ${attachment.name}`}
+          title={t("common.remove")}
+          aria-label={`${t("common.remove")} ${attachment.name}`}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();

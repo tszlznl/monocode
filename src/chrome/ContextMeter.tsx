@@ -5,6 +5,7 @@ import {
   type ContextUsage,
 } from "../lib/contextUsage";
 import { Popover } from "./Popover";
+import { useI18n } from "../lib/i18n";
 
 const SIZE = 14;
 const STROKE = 2;
@@ -34,13 +35,14 @@ export function ContextMeter({
   onCompact?: () => void;
   compactDisabled?: boolean;
 }) {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const ratio = contextRatio(usage);
   if (!usage || ratio === null) return null;
 
-  const { headline, detail } = contextTooltip(usage);
+  const { headline, detail } = contextTooltip(usage, t);
   const actionsOpen = open && onCompact != null;
 
   return (
@@ -53,8 +55,8 @@ export function ContextMeter({
       {onCompact ? (
         <button
           type="button"
-          title="Context usage"
-          aria-label={`${headline}, ${detail}. Open context actions`}
+          title={t("contextMeter.title")}
+          aria-label={t("contextMeter.ariaLabel", { headline, detail })}
           aria-expanded={actionsOpen}
           onClick={() => setOpen((value) => !value)}
           className="-m-1 grid rounded-sm p-1 outline-none focus-visible:ring-1 focus-visible:ring-accent"
@@ -80,8 +82,8 @@ export function ContextMeter({
               disabled={compactDisabled}
               title={
                 compactDisabled
-                  ? "Wait for the current operation to finish"
-                  : "Compact this conversation's context"
+                  ? t("contextMeter.waitRunning")
+                  : t("contextMeter.compactContext")
               }
               onClick={() => {
                 setOpen(false);
@@ -89,7 +91,7 @@ export function ContextMeter({
               }}
               className="mt-1.5 w-full rounded-md bg-content/10 px-2 py-1 text-[11px] text-content hover:bg-content/15 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Compact now
+              {t("contextMeter.compactNow")}
             </button>
           ) : null}
         </Popover>

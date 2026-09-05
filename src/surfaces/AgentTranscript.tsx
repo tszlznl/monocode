@@ -41,6 +41,7 @@ import {
   stubFilePreview,
 } from "../lib/harness/preview";
 import { copyText } from "../lib/clipboard";
+import { useI18n } from "../lib/i18n";
 import { playCue } from "../lib/sounds";
 import { legacyTaskListFromText } from "../lib/taskList";
 import { displayPath, resolveWorkspacePath } from "../lib/paths";
@@ -133,6 +134,7 @@ export function AgentTranscript({
   onJumpToBottomReady,
   visible = true,
 }: Props) {
+  const { t } = useI18n();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -315,7 +317,7 @@ export function AgentTranscript({
               className="rounded-md bg-content/8 px-2.5 py-1.5 font-sans text-[12px] text-content/60 hover:bg-content/12 hover:text-content"
               onClick={loadEarlier}
             >
-              Load earlier messages
+              {t("transcript.loadEarlier")}
             </button>
           </div>
         ) : null}
@@ -517,9 +519,10 @@ function TurnDuration({
   onSecondOpinion?: (harness: HarnessId, model: string) => void;
   onHandoff?: (harness: HarnessId, model: string) => void;
 }) {
+  const { t } = useI18n();
   const label = waiting
-    ? (waitingLabel ?? "Waiting for approval")
-    : formatWorkingDuration(elapsedMs, done, subagent, modelName);
+    ? (waitingLabel ?? t("transcript.waitingForApproval"))
+    : formatWorkingDuration(t, elapsedMs, done, subagent, modelName);
   const dot = (
     <span
       aria-hidden
@@ -536,11 +539,11 @@ function TurnDuration({
           : live
             ? subagent
               ? modelName
-                ? `${modelName} subagent is running`
-                : "Subagent is running"
+                ? `${modelName} ${t("transcript.subagentRunning")}`
+                : t("transcript.subagentRunning")
               : modelName
-                ? `${modelName} is working`
-                : "Agent is working"
+                ? `${modelName} ${t("transcript.working")}`
+                : t("transcript.agentWorking")
             : label
       }
       className="flex min-w-0 items-center gap-2.5 px-4 pt-1 pb-3 font-sans text-sm text-content/40"
@@ -606,6 +609,7 @@ function formatClockTime(epochMs: number): string {
 }
 
 function CopyTurnButton({ text }: { text: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -619,8 +623,8 @@ function CopyTurnButton({ text }: { text: string }) {
   return (
     <button
       type="button"
-      title={copied ? "Copied" : "Copy response"}
-      aria-label={copied ? "Copied" : "Copy response"}
+      title={copied ? t("transcript.copied") : t("transcript.copyResponse")}
+      aria-label={copied ? t("transcript.copied") : t("transcript.copyResponse")}
       className="-ml-1 rounded-md p-1 text-content/40 hover:bg-content/8 hover:text-content/70"
       onClick={() => {
         playCue("copy");
@@ -650,6 +654,7 @@ function SaveNoteButton({
   text: string;
   onSave: (text: string) => void;
 }) {
+  const { t } = useI18n();
   const [saved, setSaved] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -663,8 +668,8 @@ function SaveNoteButton({
   return (
     <button
       type="button"
-      title={saved ? "Saved to Notes" : "Save as note"}
-      aria-label={saved ? "Saved to Notes" : "Save as note"}
+      title={saved ? t("transcript.savedToNotes") : t("transcript.saveAsNote")}
+      aria-label={saved ? t("transcript.savedToNotes") : t("transcript.saveAsNote")}
       className="rounded-md p-1 text-content/40 hover:bg-content/8 hover:text-content/70"
       onClick={() => {
         playCue("copy");
@@ -1247,6 +1252,7 @@ function ActivityThinkingRow({
   bare?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const text = proseSummary(block.text) || "Thinking";
   // In a group the rail is the bullet, so there is nothing to breathe while
@@ -1285,7 +1291,7 @@ function ActivityThinkingRow({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={open ? "Hide thinking" : `Show thinking: ${text}`}
+        aria-label={open ? t("transcript.hideThinking") : t("transcript.showThinking", { text })}
         onClick={() => setOpen((value) => !value)}
         className="group flex min-w-0 items-center gap-1.5 py-1 text-left"
       >
@@ -1495,6 +1501,7 @@ function useElapsedFrom(
 }
 
 function formatWorkingDuration(
+  t: (key: string, vars?: Record<string, any>) => string,
   elapsedMs: number | null,
   done = false,
   subagent = false,
@@ -1502,22 +1509,24 @@ function formatWorkingDuration(
 ): string {
   const who = modelName?.trim();
   const elapsed = formatElapsed(elapsedMs);
-  const verb = workingVerb(done, subagent, !who);
   if (elapsed == null) {
-    if (done) return who ? `${who} ${verb}` : verb;
+    if (done) return who ? `${who} ${t("transcript.worked")}` : t("transcript.worked");
+    const verb = subagent ? t("transcript.subagentRunning") : t("transcript.working");
     return who ? `${who} ${verb}…` : `${verb}…`;
   }
-  return who ? `${who} ${verb} for ${elapsed}` : `${verb} for ${elapsed}`;
-}
-
-function workingVerb(
-  done: boolean,
-  subagent: boolean,
-  capitalized: boolean,
-): string {
-  if (done) return capitalized ? "Worked" : "worked";
-  if (subagent) return capitalized ? "Subagent running" : "subagent running";
-  return capitalized ? "Working" : "working";
+  if (done) {
+    return who
+      ? `${who} ${t("transcript.workedFor", { elapsed })}`
+      : t("transcript.workedFor", { elapsed });
+  }
+  if (subagent) {
+    return who
+      ? `${who} ${t("transcript.subagentRunningFor", { elapsed })}`
+      : t("transcript.subagentRunningFor", { elapsed });
+  }
+  return who
+    ? `${who} ${t("transcript.workingFor", { elapsed })}`
+    : t("transcript.workingFor", { elapsed });
 }
 
 function formatElapsed(elapsedMs: number | null): string | null {
@@ -1783,6 +1792,7 @@ function ApprovalControls({
   block: Block;
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
 }) {
+  const { t } = useI18n();
   const approval = block.approval;
   if (!approval || approval.decided) return null;
   return (
@@ -1792,25 +1802,27 @@ function ApprovalControls({
         className="rounded-md bg-content px-2.5 py-0.5 text-[11px] hover:bg-content/80     text-background-base"
         onClick={() => onApproval?.(approval.requestId, "allow")}
       >
-        Allow
+        {t("approval.allow")}
       </button>
       <button
         type="button"
         className="rounded-md bg-content/10 px-2.5 py-0.5 text-[11px] text-content/70 hover:bg-content/20"
         onClick={() => onApproval?.(approval.requestId, "deny")}
       >
-        Deny
+        {t("approval.deny")}
       </button>
     </div>
   );
 }
 
 function HandoffDivider({ block }: { block: Block }) {
+  const { t } = useI18n();
   const meta = block.handoff;
   if (!meta) return null;
 
   const preparing = meta.status === "preparing";
-  const label = preparing ? "Preparing a handoff" : HARNESS_TITLE[meta.to];
+  const toLabel = HARNESS_TITLE[meta.to];
+  const label = preparing ? t("transcript.preparingHandoff") : toLabel;
 
   return (
     <div className="px-4 py-5">
@@ -1820,8 +1832,8 @@ function HandoffDivider({ block }: { block: Block }) {
           role="separator"
           aria-label={
             preparing
-              ? `Preparing a handoff to ${HARNESS_TITLE[meta.to]}`
-              : `Continued with ${label}`
+              ? t("transcript.preparingHandoffTo", { to: toLabel })
+              : t("transcript.continuedWith", { label })
           }
           className="flex max-w-[min(100%,20rem)] items-center gap-1.5 px-1.5 font-sans text-[12px] text-content/55"
         >

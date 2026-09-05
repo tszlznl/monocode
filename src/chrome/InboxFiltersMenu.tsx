@@ -10,6 +10,7 @@ import {
 } from "../lib/inboxFilters";
 import { Popover } from "./Popover";
 import { ProjectLogoIcon } from "./ProjectLogoIcon";
+import { useI18n } from "../lib/i18n";
 
 export const INBOX_FILTER_MENU_WIDTH = 228;
 
@@ -29,30 +30,6 @@ type Props = {
   onClose: () => void;
 };
 
-const TIME_OPTIONS: { id: InboxTimeFilter; label: string }[] = [
-  { id: "all", label: "All time" },
-  { id: "today", label: "Today" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
-];
-
-const KIND_OPTIONS: {
-  id: InboxKind;
-  label: string;
-  icon: ReactNode;
-}[] = [
-  {
-    id: "issue",
-    label: "Issues",
-    icon: <CircleDot className="size-3.5 shrink-0" strokeWidth={1.75} />,
-  },
-  {
-    id: "pr",
-    label: "Pull requests",
-    icon: <GitPullRequest className="size-3.5 shrink-0" strokeWidth={1.75} />,
-  },
-];
-
 export function InboxFiltersMenu({
   x,
   y,
@@ -62,6 +39,32 @@ export function InboxFiltersMenu({
   onChange,
   onClose,
 }: Props) {
+  const { t } = useI18n();
+
+  const timeOptions: { id: InboxTimeFilter; label: string }[] = [
+    { id: "all", label: t("inbox.allTime") },
+    { id: "today", label: t("inbox.today") },
+    { id: "7d", label: t("inbox.last7Days") },
+    { id: "30d", label: t("inbox.last30Days") },
+  ];
+
+  const kindOptions: {
+    id: InboxKind;
+    label: string;
+    icon: ReactNode;
+  }[] = [
+    {
+      id: "issue",
+      label: t("inbox.issues"),
+      icon: <CircleDot className="size-3.5 shrink-0" strokeWidth={1.75} />,
+    },
+    {
+      id: "pr",
+      label: t("inbox.pullRequests"),
+      icon: <GitPullRequest className="size-3.5 shrink-0" strokeWidth={1.75} />,
+    },
+  ];
+
   const hiddenProjects = new Set(filters.hiddenProjects);
   const hiddenKinds = new Set(filters.hiddenKinds);
 
@@ -102,44 +105,44 @@ export function InboxFiltersMenu({
       maxHeight={480}
       onDismiss={onClose}
       role="menu"
-      aria-label="Filter inbox"
+      aria-label={t("inbox.filterInbox")}
       onContextMenu={(event) => event.preventDefault()}
       className="overflow-y-auto overscroll-none p-1"
     >
       <FilterItem
-        label="Assigned to me"
+        label={t("inbox.assignedToMe")}
         checked={filters.assignedToMe}
         onClick={toggleAssigned}
       />
 
-      <SectionLabel>Status</SectionLabel>
+      <SectionLabel>{t("inbox.status")}</SectionLabel>
       <FilterItem
-        label="Open"
+        label={t("inbox.statusOpen")}
         checked={filters.status.open}
         onClick={() => toggleStatus("open")}
       />
       {source === "github" ? (
         <FilterItem
-          label="Draft"
+          label={t("inbox.statusDraft")}
           checked={filters.status.draft}
           onClick={() => toggleStatus("draft")}
         />
       ) : null}
       <FilterItem
-        label="Closed"
+        label={t("inbox.statusClosed")}
         checked={filters.status.closed}
         onClick={() => toggleStatus("closed")}
       />
       {source === "github" ? (
         <FilterItem
-          label="Merged"
+          label={t("inbox.statusMerged")}
           checked={filters.status.merged}
           onClick={() => toggleStatus("merged")}
         />
       ) : null}
 
-      <SectionLabel>Time</SectionLabel>
-      {TIME_OPTIONS.map((option) => (
+      <SectionLabel>{t("inbox.time")}</SectionLabel>
+      {timeOptions.map((option) => (
         <FilterItem
           key={option.id}
           label={option.label}
@@ -150,8 +153,8 @@ export function InboxFiltersMenu({
 
       {source === "github" ? (
         <>
-          <SectionLabel>Type</SectionLabel>
-          {KIND_OPTIONS.map((option) => (
+          <SectionLabel>{t("inbox.type")}</SectionLabel>
+          {kindOptions.map((option) => (
             <FilterItem
               key={option.id}
               label={option.label}
@@ -165,7 +168,7 @@ export function InboxFiltersMenu({
 
       {source === "github" && projects.length > 0 ? (
         <>
-          <SectionLabel>Projects</SectionLabel>
+          <SectionLabel>{t("inbox.projects")}</SectionLabel>
           {projects.map((project) => (
             <FilterItem
               key={project.path}
@@ -196,7 +199,7 @@ export function InboxFiltersMenu({
             onClick={() => onChange(DEFAULT_INBOX_FILTERS)}
             className="flex h-7 w-full items-center rounded-lg px-2 text-left text-[13px] leading-none text-content/70 hover:bg-content/5 hover:text-content"
           >
-            Clear filters
+            {t("inbox.clearFilters")}
           </button>
         </>
       ) : null}

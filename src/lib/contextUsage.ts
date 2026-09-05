@@ -40,18 +40,32 @@ export function formatTokens(count: number): string {
 }
 
 /** Two-line hover text: "69% context used" over "176K / 256K tokens". */
-export function contextTooltip(usage: ContextUsage): {
+export function contextTooltip(
+  usage: ContextUsage,
+  tFn?: (key: string, params?: Record<string, string | number>) => string,
+): {
   headline: string;
   detail: string;
 } {
   const percent = contextPercent(usage);
-  return {
-    headline:
-      percent === null ? "Context used" : `${percent}% context used`,
-    detail: usage.window
+  const headline = tFn
+    ? percent === null
+      ? tFn("contextMeter.contextUsed")
+      : tFn("contextMeter.percentUsed", { percent })
+    : percent === null
+      ? "Context used"
+      : `${percent}% context used`;
+  const detail = tFn
+    ? usage.window
+      ? tFn("contextMeter.tokenCountWithWindow", {
+          used: formatTokens(usage.used),
+          window: formatTokens(usage.window),
+        })
+      : tFn("contextMeter.tokenCount", { used: formatTokens(usage.used) })
+    : usage.window
       ? `${formatTokens(usage.used)} / ${formatTokens(usage.window)} tokens`
-      : `${formatTokens(usage.used)} tokens`,
-  };
+      : `${formatTokens(usage.used)} tokens`;
+  return { headline, detail };
 }
 
 /**

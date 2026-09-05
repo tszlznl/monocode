@@ -14,6 +14,7 @@ import {
   type InboxProvider,
 } from "../lib/githubTasks";
 import { MOD } from "../lib/platform";
+import { useI18n } from "../lib/i18n";
 import { AgentMarkdown } from "./AgentMarkdown";
 
 export type InboxReplyTarget = {
@@ -126,6 +127,7 @@ export function InboxCommentForm({
   onCancelReply: () => void;
   onSubmit: (body: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
   const canPost = draft.trim().length > 0 && !posting;
@@ -172,12 +174,12 @@ export function InboxCommentForm({
       {replyTo ? (
         <div className="flex items-center gap-2 text-[12px] text-content/50">
           <span className="min-w-0 truncate">
-            Replying to {replyTo.author || "comment"}
+            {t("inbox.replyingTo", { author: replyTo.author || "comment" })}
           </span>
           <button
             type="button"
-            title="Cancel reply"
-            aria-label="Cancel reply"
+            title={t("inbox.cancelReply")}
+            aria-label={t("inbox.cancelReply")}
             onClick={onCancelReply}
             className="grid size-5 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content"
           >
@@ -192,7 +194,9 @@ export function InboxCommentForm({
           value={draft}
           disabled={posting}
           placeholder={
-            replyTo ? `Write a reply (${MOD}↩)` : `Leave a comment (${MOD}↩)`
+            replyTo
+              ? t("inbox.writeReply", { mod: MOD })
+              : t("inbox.leaveComment", { mod: MOD })
           }
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
@@ -204,7 +208,11 @@ export function InboxCommentForm({
             disabled={!canPost}
             className="inline-flex h-7 items-center rounded-md bg-content px-3 text-[12px] text-background-base hover:bg-content/80 disabled:cursor-default disabled:opacity-40"
           >
-            {posting ? "Posting..." : replyTo ? "Reply" : "Comment"}
+            {posting
+              ? t("inbox.posting")
+              : replyTo
+                ? t("inbox.reply")
+                : t("inbox.comment")}
           </button>
         </div>
       </div>
@@ -216,10 +224,11 @@ export function InboxCommentForm({
 }
 
 function CommentsPending() {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-2 border-t border-content/10 pt-5 text-[12px] text-content/45">
       <LoaderCircle className="size-3.5 animate-spin" strokeWidth={1.75} />
-      Loading comments
+      {t("inbox.loadingComments")}
     </div>
   );
 }
@@ -239,13 +248,14 @@ function InboxComment({
   replyMode?: "thread" | "parent";
   onReply?: (target: InboxReplyTarget) => void;
 }) {
+  const { t } = useI18n();
   const time = formatRelativeTime(comment.createdAt);
   const review = githubReviewStateLabel(comment.state);
   const location = commentLocation(comment);
   const meta = [
     review,
     location,
-    comment.resolved ? "Resolved" : "",
+    comment.resolved ? t("inbox.resolved") : "",
     time,
   ].filter((part) => part.length > 0);
   const hasBody = comment.body.trim().length > 0;
@@ -280,7 +290,7 @@ function InboxComment({
               <button
                 type="button"
                 title={
-                  provider === "linear" ? "Open in Linear" : "Open on GitHub"
+                  provider === "linear" ? t("inbox.openInLinear") : t("inbox.openOnGithub")
                 }
                 onClick={() => void openUrl(comment.url)}
                 className="hover:text-content"
@@ -294,7 +304,7 @@ function InboxComment({
                     ? "text-emerald-400/90"
                     : comment.state === "CHANGES_REQUESTED"
                       ? "text-rose-400/90"
-                      : comment.resolved && part === "Resolved"
+                      : comment.resolved && part === t("inbox.resolved")
                         ? "text-emerald-400/80"
                         : "min-w-0 truncate"
                 }
@@ -318,7 +328,7 @@ function InboxComment({
               }
               className="hover:text-content"
             >
-              Reply
+              {t("inbox.reply")}
             </button>
           </span>
         ) : null}

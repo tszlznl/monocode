@@ -128,14 +128,22 @@ const DEFAULT_WIDTH = 260;
 
 let rememberedWidth = DEFAULT_WIDTH;
 
+import { useI18n } from "../lib/i18n";
+
 type SidebarTab = SidebarTabId;
 
-const TAB_LABELS: Record<SidebarTab, string> = {
-  sessions: "Sessions",
-  inbox: "Inbox",
-  files: "Explorer",
-  changes: "Changes",
-};
+function getTabLabel(itemId: SidebarTab, t: (key: string) => string): string {
+  switch (itemId) {
+    case "sessions":
+      return t("sidebar.tabSessions");
+    case "inbox":
+      return t("sidebar.tabInbox");
+    case "files":
+      return t("sidebar.tabFiles");
+    case "changes":
+      return t("sidebar.tabChanges");
+  }
+}
 
 function projectPathBusy(
   paths: Iterable<string> | undefined,
@@ -290,6 +298,7 @@ function SidebarComponent({
   onOpenWhatsNew,
   onDismissUpdate,
 }: Props) {
+  const { t } = useI18n();
   const gitRoot = gitCwd || cwd;
   const inboxUnseen = useInboxUnseen(recents, cwd);
   const resize = useDragResize({
@@ -557,9 +566,9 @@ function SidebarComponent({
     ? sessionFolders.find((folder) => folder.id === folderMenu.folderId)
     : undefined;
   const folderMenuItems: ExplorerMenuItem[] = [
-    { kind: "item", id: "rename", label: "Rename", shortcut: "F2" },
+    { kind: "item", id: "rename", label: t("common.rename"), shortcut: "F2" },
     { kind: "sep" },
-    { kind: "item", id: "ungroup", label: "Ungroup" },
+    { kind: "item", id: "ungroup", label: t("sidebar.ungroup") },
   ];
   const sessionMenuItems: ExplorerMenuItem[] = [
     ...(onPinSession
@@ -567,7 +576,7 @@ function SidebarComponent({
           {
             kind: "item" as const,
             id: "pin",
-            label: menuSession?.pinned ? "Unpin" : "Pin",
+            label: menuSession?.pinned ? t("common.unpin") : t("common.pin"),
           },
         ]
       : []),
@@ -576,18 +585,18 @@ function SidebarComponent({
           {
             kind: "item" as const,
             id: "rename",
-            label: "Rename",
+            label: t("common.rename"),
             shortcut: "F2",
           },
         ]
       : []),
     { kind: "sep" as const },
-    { kind: "item" as const, id: "folder-new", label: "New folder" },
+    { kind: "item" as const, id: "folder-new", label: t("sidebar.newFolder") },
     ...(sessionFolders.length > 0 ? [{ kind: "sep" as const }] : []),
     ...sessionFolders.map((folder) => ({
       kind: "item" as const,
       id: `folder-add:${folder.id}`,
-      label: `Add to ${folder.name}`,
+      label: t("sidebar.addToFolder", { folder: folder.name }),
       checked: menuSessionFolder?.id === folder.id,
     })),
     ...(menuSessionFolder
@@ -595,7 +604,7 @@ function SidebarComponent({
           {
             kind: "item" as const,
             id: "folder-remove",
-            label: "Remove from folder",
+            label: t("sidebar.removeFromFolder"),
           },
         ]
       : []),
@@ -607,7 +616,9 @@ function SidebarComponent({
                 {
                   kind: "item" as const,
                   id: "archive",
-                  label: menuSession?.archived ? "Unarchive" : "Archive",
+                  label: menuSession?.archived
+                    ? t("sidebar.unarchive")
+                    : t("common.archive"),
                 },
               ]
             : []),
@@ -616,7 +627,7 @@ function SidebarComponent({
                 {
                   kind: "item" as const,
                   id: "delete",
-                  label: "Delete",
+                  label: t("common.delete"),
                   shortcut: "⌫",
                   danger: true,
                 },
@@ -800,8 +811,8 @@ function SidebarComponent({
       ref={searchInputRef}
       type="text"
       value={searchQuery}
-      placeholder="Search conversations..."
-      aria-label="Search conversations"
+      placeholder={t("sidebar.searchConversations")}
+      aria-label={t("sidebar.searchConversations")}
       spellCheck={false}
       autoComplete="off"
       autoCorrect="off"
@@ -868,13 +879,13 @@ function SidebarComponent({
             isChangesTab
               ? hasChangeStats
                 ? [
-                    "Changes",
+                    getTabLabel(itemId, t),
                     changeAdditions > 0 ? `+${changeAdditions}` : "",
                     changeDeletions > 0 ? `-${changeDeletions}` : "",
                   ]
                     .filter(Boolean)
                     .join(" ")
-                : "Changes"
+                : getTabLabel(itemId, t)
               : undefined
           }
           data-tauri-drag-region="false"
@@ -891,7 +902,7 @@ function SidebarComponent({
           {isChangesTab && hasChangeStats ? (
             <DiffStat additions={changeAdditions} deletions={changeDeletions} />
           ) : (
-            <span className="block truncate">{TAB_LABELS[itemId]}</span>
+            <span className="block truncate">{getTabLabel(itemId, t)}</span>
           )}
         </button>
       </div>
@@ -910,13 +921,13 @@ function SidebarComponent({
             data-tauri-drag-region="deep"
           >
             <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
-              Workspace
+              {t("sidebar.workspace")}
             </span>
             <WorkspaceTitleActions onSearch={onGoToFile} onNew={onNew} />
           </div>
           <div
             role="tablist"
-            aria-label="Workspace"
+            aria-label={t("sidebar.workspace")}
             className="flex h-9 shrink-0 items-center gap-px border-b border-content/10 px-2"
           >
             {workspaceTabItems}
@@ -957,7 +968,7 @@ function SidebarComponent({
           ) : null}
           <div
             role="tablist"
-            aria-label="Workspace"
+            aria-label={t("sidebar.workspace")}
             className="flex h-9 shrink-0 items-center gap-px overflow-visible border-b border-content/10 px-2"
           >
             {workspaceTabItems}
@@ -994,7 +1005,7 @@ function SidebarComponent({
             </div>
           ) : (
             <p className="px-3 py-2 text-[12px] text-content/50">
-              No project folder
+              {t("sidebar.noProjectFolder")}
             </p>
           )}
         </div>
@@ -1005,7 +1016,7 @@ function SidebarComponent({
               {sessionSearchInput}
             </div>
             <SessionsHeaderButton
-              label="Filter sessions"
+              label={t("sidebar.filterSessions")}
               active={filtersActive}
               open={!!filterMenu}
               hasPopup
@@ -1026,7 +1037,7 @@ function SidebarComponent({
         >
           {!cwd || cwd === "~" ? (
             <p className="px-3 py-2 text-[12px] text-content/50">
-              No project folder
+              {t("sidebar.noProjectFolder")}
             </p>
           ) : (
             <div>
@@ -1040,7 +1051,7 @@ function SidebarComponent({
               {pendingFirstLoad ? null : status === "error" &&
                 sessions.length === 0 ? (
                 <p className="px-3 py-2 text-[12px] text-content/50">
-                  Couldn’t load sessions
+                  {t("sidebar.loadError")}
                 </p>
               ) : visibleSessions.length === 0 ? (
                 // A narrowed-down result is a transient answer to what the user
@@ -1049,11 +1060,11 @@ function SidebarComponent({
                 narrowedByUser ? (
                   <p className="px-3 py-2 text-[12px] text-content/50">
                     {searchNarrowed
-                      ? "No matching sessions"
-                      : "No sessions match these filters"}
+                      ? t("sidebar.noMatchingSessions")
+                      : t("sidebar.noFilterSessions")}
                   </p>
                 ) : (
-                  <SessionsEmpty message="Sessions you start will show up here" />
+                  <SessionsEmpty message={t("sidebar.emptySessions")} />
                 )
               ) : (
                 <ul className="flex flex-col gap-0.5 p-1.5">
@@ -1197,8 +1208,8 @@ function SidebarComponent({
                                       type="button"
                                       data-no-drag
                                       data-tauri-drag-region="false"
-                                      title="New session"
-                                      aria-label="New session"
+                                      title={t("sidebar.newSession")}
+                                      aria-label={t("sidebar.newSession")}
                                       onClick={() =>
                                         onNewInFolder(entry.folder.id)
                                       }
@@ -1209,7 +1220,7 @@ function SidebarComponent({
                                         strokeWidth={1.75}
                                       />
                                       <span className="text-[13px] font-semibold leading-snug">
-                                        New session
+                                        {t("sidebar.newSession")}
                                       </span>
                                     </button>
                                   </div>
@@ -1312,7 +1323,7 @@ function SidebarComponent({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize sidebar"
+        aria-label={t("sidebar.resizeSidebar")}
         aria-valuenow={resize.width}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={MAX_WIDTH}
@@ -1399,6 +1410,7 @@ function SidebarProjectPicker({
   notesActive?: boolean;
   inboxUnseen?: boolean;
 }) {
+  const { t } = useI18n();
   const [groupLabels] = useState(loadTabGroupLabels);
   const [groupColors] = useState(loadTabGroupColors);
   const [groupCustomColors] = useState(loadTabGroupCustomColors);
@@ -1453,7 +1465,7 @@ function SidebarProjectPicker({
       <div className="flex items-center ml-auto">
         {onSearch ? (
           <IconButton
-            label={`Search (${MOD}K)`}
+            label={`${t("common.search")} (${MOD}K)`}
             active={searchActive}
             onClick={onSearch}
           >
@@ -1462,7 +1474,7 @@ function SidebarProjectPicker({
         ) : null}
         {onOpenInbox ? (
           <IconButton
-            label={inboxUnseen ? "Inbox, new items" : "Inbox"}
+            label={inboxUnseen ? t("rail.inboxNew") : t("rail.inbox")}
             active={inboxActive}
             onClick={onOpenInbox}
           >
@@ -1478,7 +1490,7 @@ function SidebarProjectPicker({
           </IconButton>
         ) : null}
         {onOpenNotes ? (
-          <IconButton label="Notes" active={notesActive} onClick={onOpenNotes}>
+          <IconButton label={t("rail.notes")} active={notesActive} onClick={onOpenNotes}>
             <StickyNote className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
@@ -1494,6 +1506,7 @@ function WorkspaceTitleActions({
   onSearch?: () => void;
   onNew?: () => void;
 }) {
+  const { t } = useI18n();
   if (!onSearch && !onNew) return null;
   return (
     <div
@@ -1501,12 +1514,12 @@ function WorkspaceTitleActions({
       data-tauri-drag-region="false"
     >
       {onSearch ? (
-        <IconButton label={`Go to File (${MOD}P)`} onClick={onSearch}>
+        <IconButton label={`${t("sidebar.goToFile")} (${MOD}P)`} onClick={onSearch}>
           <Search className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
       {onNew ? (
-        <IconButton label={`New session (${MOD}T)`} onClick={onNew}>
+        <IconButton label={`${t("sidebar.newSession")} (${MOD}T)`} onClick={onNew}>
           <Plus className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
@@ -1804,6 +1817,7 @@ function SessionCard({
   onRename?: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useI18n();
   const skipClickUntil = useRef(0);
   const [dragging, setDragging] = useState(false);
   const title = sessionDisplayTitle(session.title, session.harness);
@@ -1826,17 +1840,17 @@ function SessionCard({
       {needsApproval ? (
         <>
           <CircleAlert className="size-3" strokeWidth={1.75} />
-          <span>Need approval</span>
+          <span>{t("sidebar.statusNeedApproval")}</span>
         </>
       ) : busy ? (
         <>
           <TerminalSpinner className="inline-block w-3 select-none text-center text-[11px] leading-none text-accent" />
-          <span>Working...</span>
+          <span>{t("sidebar.statusWorking")}</span>
         </>
       ) : done ? (
         <>
           <Check className="size-3" strokeWidth={2.25} />
-          <span>Done</span>
+          <span>{t("sidebar.statusDone")}</span>
         </>
       ) : (
         <span>{time}</span>
@@ -2118,6 +2132,7 @@ function DiffStat({
   additions: number;
   deletions: number;
 }) {
+  const { t } = useI18n();
   if (additions <= 0 && deletions <= 0) return null;
 
   const label = [
@@ -2129,7 +2144,7 @@ function DiffStat({
 
   return (
     <span
-      title={`${label} uncommitted`}
+      title={t("rail.uncommittedDiff", { label })}
       className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] font-semibold tabular-nums"
     >
       {additions > 0 ? (

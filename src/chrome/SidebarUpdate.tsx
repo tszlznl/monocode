@@ -9,6 +9,7 @@ import {
 } from "../lib/updater";
 import type { InstalledUpdate } from "../lib/updateNotice";
 import { UpdateRailCard } from "./UpdateRailCard";
+import { useI18n } from "../lib/i18n";
 
 export function SidebarUpdateFooter({
   update,
@@ -34,6 +35,7 @@ export function SidebarUpdateFooter({
 }
 
 export function SidebarUpdate() {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<UpdaterSnapshot>({
     phase: "idle",
     currentVersion: "…",
@@ -87,12 +89,14 @@ export function SidebarUpdate() {
     snapshot.phase === "checking" || snapshot.phase === "downloading";
   const hasUpdate = snapshot.phase === "available";
   const label = hasUpdate
-    ? `Update to ${snapshot.availableVersion}`
+    ? t("sidebar.update.updateTo", { version: snapshot.availableVersion ?? "" })
     : busy
       ? snapshot.phase === "downloading"
-        ? `Downloading${snapshot.progress != null ? ` ${snapshot.progress}%` : "…"}`
-        : "Checking…"
-      : "Check for updates";
+        ? snapshot.progress != null
+          ? t("sidebar.update.downloadingProgress", { progress: snapshot.progress })
+          : t("sidebar.update.downloading")
+        : t("sidebar.update.checking")
+      : t("sidebar.update.checkForUpdates");
 
   return (
     <button

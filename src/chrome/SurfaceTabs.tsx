@@ -17,6 +17,7 @@ import { terminalTabLabel } from "../lib/terminalTab";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { useSortable } from "../hooks/useSortable";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   files: FilePaneTab[];
@@ -40,6 +41,7 @@ export type SurfaceTabPresentation = {
 
 export function surfaceTabPresentation(
   file: FilePaneTab,
+  t?: (key: string, params?: Record<string, string | number>) => string,
 ): SurfaceTabPresentation {
   if (isReleaseNotesTab(file)) {
     const title = releaseNotesTitle(file.releaseNotes.version);
@@ -53,19 +55,19 @@ export function surfaceTabPresentation(
 
   if (isChangesTab(file)) {
     return {
-      name: "Changes",
-      label: "Changes",
+      name: t ? t("tabs.changes") : "Changes",
+      label: t ? t("tabs.changes") : "Changes",
       iconName: "CHANGES",
-      tooltip: "Working tree changes",
+      tooltip: t ? t("tabs.workingTreeChanges") : "Working tree changes",
     };
   }
 
   if (isSessionChangesTab(file)) {
     return {
-      name: "Session Changes",
-      label: "Session Changes",
+      name: t ? t("tabs.sessionChanges") : "Session Changes",
+      label: t ? t("tabs.sessionChanges") : "Session Changes",
       iconName: "CHANGES",
-      tooltip: "Changes captured for this session only",
+      tooltip: t ? t("tabs.sessionChangesDesc") : "Changes captured for this session only",
     };
   }
 
@@ -81,29 +83,38 @@ export function surfaceTabPresentation(
 
   const review = isReviewTab(file);
   const terminal = isTerminalTab(file);
+  const suffix = t ? t("tabs.workingTreeSuffix") : " (Working Tree)";
+  const planDefault = t ? t("composer.plan") : "Plan";
   const name = isPlanTab(file)
-    ? file.plan.title.trim() || "Plan"
+    ? file.plan.title.trim() || planDefault
     : terminal
       ? terminalTabLabel(file)
       : basename(file.path);
   return {
     name,
-    label: review ? `${name} (Working Tree)` : name,
+    label: review ? `${name}${suffix}` : name,
     iconName: isPlanTab(file) ? "plan.md" : name,
     tooltip: isPlanTab(file)
       ? name
       : terminal
         ? `${name} — ${file.cwd}`
         : review
-          ? `${file.path} (Working Tree)`
+          ? `${file.path}${suffix}`
           : file.path,
   };
 }
 
 /** Tab tooltip: the path, then what is wrong with it. */
-export function appendProblems(title: string, errors: number): string {
+export function appendProblems(
+  title: string,
+  errors: number,
+  t?: (key: string, params?: Record<string, string | number>) => string,
+): string {
   if (!errors) return title;
-  return `${title} — ${errors} ${errors === 1 ? "problem" : "problems"}`;
+  const problems = t
+    ? t("tabs.problems", { count: errors })
+    : `${errors} ${errors === 1 ? "problem" : "problems"}`;
+  return `${title} — ${problems}`;
 }
 
 export function SurfaceTabs({
@@ -115,9 +126,11 @@ export function SurfaceTabs({
   onCloseFile,
   onReorder,
   onPaneDragStart,
-  label = "Open files",
+  label,
   trailing,
 }: Props) {
+  const { t } = useI18n();
+  const tablistAriaLabel = label ?? t("tabs.openFiles");
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const fileIds = files.map((file) => file.id);
@@ -137,14 +150,14 @@ export function SurfaceTabs({
       <div
         ref={lockOverscroll}
         role="tablist"
-        aria-label={label}
+        aria-label={tablistAriaLabel}
         className="scrollbar-none flex min-w-0 flex-1 overflow-x-auto overscroll-none"
       >
       {onPaneDragStart ? (
         <div
           role="button"
-          title="Drag to reorder pane"
-          aria-label="Drag to reorder pane"
+          title={t("tabs.dragToReorder")}
+          aria-label={t("tabs.dragToReorder")}
           tabIndex={-1}
           className="grid h-full w-5 shrink-0 cursor-grab place-items-center text-content/35 hover:bg-content/5 hover:text-content/70 active:cursor-grabbing touch-none"
           onPointerDown={(event) => {
@@ -165,7 +178,7 @@ export function SurfaceTabs({
         const commit = isCommitTab(file);
         const review = isReviewTab(file) && !changes;
         const terminal = isTerminalTab(file);
-        const { label, iconName, tooltip } = surfaceTabPresentation(file);
+        const { label, iconName, tooltip } = surfaceTabPresentation(file, t);
         const dragging = sortable.draggingId === file.id;
         const showStart =
           sortable.draggingId &&
@@ -210,7 +223,7 @@ export function SurfaceTabs({
               type="button"
               role="tab"
               aria-selected={active}
-              title={appendProblems(tooltip, errors)}
+              title={appendProblems(tooltip, errors, t)}
               onClick={() => {
                 if (sortable.consumeClick()) return;
                 onSelectFile(file.id);
@@ -242,15 +255,15 @@ export function SurfaceTabs({
               {dirty ? (
                 <span
                   className="size-1.5 shrink-0 rounded-full bg-content/75"
-                  title="Unsaved changes"
-                  aria-label="Unsaved changes"
+                  title={t("tabs.unsavedChanges")}
+                  aria-label={t("tabs.unsavedChanges")}
                 />
               ) : null}
             </button>
             <button
               type="button"
-              title={`Close ${label}`}
-              aria-label={`Close ${label}`}
+              title={t("tabs.closeNamed", { name: label })}
+              aria-label={t("tabs.closeNamed", { name: label })}
               data-no-drag
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {

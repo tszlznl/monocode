@@ -73,26 +73,28 @@ import { TabGroupMenu, type TabGroupMenuExtraItem } from "./TabGroupMenu";
 import { TerminalSpinner } from "./TerminalSpinner";
 import type { SettingsSectionId } from "../lib/settings";
 
-const REVEAL_LABEL = IS_MAC
-  ? "Reveal in Finder"
-  : typeof navigator !== "undefined" && /Win/.test(navigator.platform)
-    ? "Reveal in File Explorer"
-    : "Open Containing Folder";
+import { useI18n } from "../lib/i18n";
 
 function projectMenuExtraItems(
   pinned: boolean,
   canRemove: boolean,
+  t: (key: string) => string,
 ): TabGroupMenuExtraItem[] {
+  const revealLabel = IS_MAC
+    ? t("rail.revealFinder")
+    : typeof navigator !== "undefined" && /Win/.test(navigator.platform)
+      ? t("rail.revealExplorer")
+      : t("rail.revealFolder");
   const items: TabGroupMenuExtraItem[] = [
     pinned
-      ? { id: "unpin", label: "Unpin project", icon: PinOff }
-      : { id: "pin", label: "Pin project", icon: Pin },
-    { id: "reveal", label: REVEAL_LABEL, icon: FolderOpen },
+      ? { id: "unpin", label: t("rail.unpinProject"), icon: PinOff }
+      : { id: "pin", label: t("rail.pinProject"), icon: Pin },
+    { id: "reveal", label: revealLabel, icon: FolderOpen },
   ];
   if (canRemove) {
     items.push(
-      { id: "archive", label: "Archive", icon: Archive, sepBefore: true },
-      { id: "delete", label: "Delete", icon: Trash2, danger: true },
+      { id: "archive", label: t("common.archive"), icon: Archive, sepBefore: true },
+      { id: "delete", label: t("common.delete"), icon: Trash2, danger: true },
     );
   }
   return items;
@@ -163,6 +165,7 @@ export function ProjectRail({
   onOpenWhatsNew,
   onDismissUpdate,
 }: Props) {
+  const { t } = useI18n();
   const resize = useDragResize({
     min: PROJECT_RAIL_WIDTH_MIN,
     max: () =>
@@ -353,7 +356,7 @@ export function ProjectRail({
   return (
     <nav
       ref={resize.setPaneRef}
-      aria-label="Projects"
+      aria-label={t("rail.projects")}
       className="sidebar-glass relative flex shrink-0 flex-col border-r border-content/10"
     >
       <div
@@ -382,29 +385,29 @@ export function ProjectRail({
         <>
           <div className="flex shrink-0 flex-col gap-px px-2 pb-2 pt-0.5">
             <RailSearch
-              label="Search"
+              label={t("rail.search")}
               icon={Search}
               onClick={onSearch}
               active={searchActive}
               shortcut={`${MOD}K`}
-              ariaLabel={`Search (${MOD}K)`}
+              ariaLabel={`${t("rail.search")} (${MOD}K)`}
             />
             <div className="mt-0.5" />
             <RailAction
-              label="Inbox"
+              label={t("rail.inbox")}
               icon={Inbox}
               onClick={onOpenInbox}
               active={inboxActive}
               dot={inboxUnseen}
-              ariaLabel={inboxUnseen ? "Inbox, new items" : "Inbox"}
+              ariaLabel={inboxUnseen ? t("rail.inboxNew") : t("rail.inbox")}
             />
             {notesEnabled ? (
               <RailAction
-                label="Notes"
+                label={t("rail.notes")}
                 icon={File}
                 onClick={onOpenNotes}
                 active={notesActive}
-                ariaLabel="Notes"
+                ariaLabel={t("rail.notes")}
               />
             ) : null}
           </div>
@@ -418,7 +421,7 @@ export function ProjectRail({
           >
             {sections.pinned.length > 0 ? (
               <ProjectSection
-                label="Pinned"
+                label={t("rail.pinned")}
                 items={sections.pinned}
                 cwd={cwd}
                 busy={busy}
@@ -438,9 +441,9 @@ export function ProjectRail({
             ) : null}
 
             <ProjectSection
-              label="Projects"
+              label={t("rail.projects")}
               items={sections.projects}
-              emptyLabel="No projects yet"
+              emptyLabel={t("rail.noProjects")}
               onAdd={onOpenProject}
               cwd={cwd}
               busy={busy}
@@ -474,11 +477,11 @@ export function ProjectRail({
           />
           <div className="flex shrink-0 flex-col gap-px p-2 pt-0">
             <RailAction
-              label="Settings"
+              label={t("rail.settings")}
               icon={Settings}
               onClick={onOpenSettings}
               shortcut={`${MOD},`}
-              ariaLabel={`Settings (${MOD},)`}
+              ariaLabel={`${t("rail.settings")} (${MOD},)`}
             />
           </div>
         </>
@@ -528,6 +531,7 @@ export function ProjectRail({
               sameProjectPath(pinned, projectMenu.path),
             ),
             Boolean(onRemoveProject),
+            t,
           )}
           onExtraPick={onProjectMenuPick}
         />
@@ -543,7 +547,7 @@ export function ProjectRail({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize project sidebar"
+        aria-label={t("sidebar.resizeSidebar")}
         aria-valuenow={resize.width}
         aria-valuemin={PROJECT_RAIL_WIDTH_MIN}
         aria-valuemax={PROJECT_RAIL_WIDTH_MAX}
@@ -579,6 +583,7 @@ function LiveAgentsPreview({
   groupCustomColors: Record<string, string>;
   groupMascots: Record<string, string>;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const lockList = useLockOverscroll<HTMLDivElement>();
@@ -602,7 +607,7 @@ function LiveAgentsPreview({
     <div className="shrink-0 px-2">
       <div
         role="status"
-        aria-label="Working agents"
+        aria-label={t("sidebar.filters.working")}
         className="overflow-hidden rounded-lg bg-content/5"
       >
         <div className="flex items-center gap-2 px-3.5 py-1.5">
@@ -611,7 +616,7 @@ function LiveAgentsPreview({
             className="size-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)] animate-pulse"
           />
           <span className="min-w-0 flex-1 truncate text-xs text-content/50">
-            Working
+            {t("sidebar.filters.working")}
           </span>
           <span className="text-[11px] tabular-nums text-content/40">
             {agents.length}
@@ -800,6 +805,7 @@ function ProjectSection({
   groupLogos: ReturnType<typeof useTabGroupLogos>;
   groupMascots: Record<string, string>;
 }) {
+  const { t } = useI18n();
   return (
     <div className="shrink-0 mb-2">
       <div className="flex items-center gap-1 px-3 pb-1.5 pt-1">
@@ -809,8 +815,8 @@ function ProjectSection({
         {onAdd ? (
           <button
             type="button"
-            title="Open project"
-            aria-label="Open project"
+            title={t("rail.openProject")}
+            aria-label={t("rail.openProject")}
             onClick={onAdd}
             className="grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
           >
@@ -885,6 +891,7 @@ function ProjectCard({
   groupLogos: ReturnType<typeof useTabGroupLogos>;
   groupMascots: Record<string, string>;
 }) {
+  const { t } = useI18n();
   const fallbackName = basename(item.path);
   const projectKey = projectName(item.path);
   const name = resolveTabGroupLabel(projectKey, groupLabels, fallbackName);
@@ -985,8 +992,8 @@ function ProjectCard({
       <button
         type="button"
         data-no-drag
-        title="Project options"
-        aria-label="Project options"
+        title={t("rail.projectOptions")}
+        aria-label={t("rail.projectOptions")}
         aria-haspopup="menu"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1000,8 +1007,8 @@ function ProjectCard({
       <button
         type="button"
         data-no-drag
-        title={pinned ? "Unpin project" : "Pin project"}
-        aria-label={pinned ? "Unpin project" : "Pin project"}
+        title={pinned ? t("rail.unpinProject") : t("rail.pinProject")}
+        aria-label={pinned ? t("rail.unpinProject") : t("rail.pinProject")}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -1033,6 +1040,7 @@ function ProjectDiffStat({
   additions: number;
   deletions: number;
 }) {
+  const { t } = useI18n();
   if (additions <= 0 && deletions <= 0) return null;
 
   const label = [
@@ -1044,7 +1052,7 @@ function ProjectDiffStat({
 
   return (
     <span
-      title={`${label} uncommitted`}
+      title={t("rail.uncommittedDiff", { label })}
       className="flex shrink-0 items-center gap-1 font-mono text-[11px] font-semibold tabular-nums"
     >
       {additions > 0 ? (

@@ -19,6 +19,7 @@ import { MenuBar } from "./chrome/MenuBar";
 import { FilePicker } from "./chrome/FilePicker";
 import { UsageFooter } from "./chrome/UsageFooter";
 import { useProjectBranches } from "./hooks/useProjectBranches";
+import { t } from "./lib/i18n";
 import {
   loadProjectRailOpen,
   loadSidebarTabOrder,
@@ -1329,7 +1330,7 @@ export default function App({
         return;
       }
       if (!item.id) {
-        throw new Error("Missing Linear issue");
+        throw new Error(t("inbox.missingLinearIssue"));
       }
       if (body !== undefined) {
         start(body);

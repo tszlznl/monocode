@@ -7,6 +7,7 @@ import {
 } from "../lib/settings";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { TerminalGridBackground } from "./TerminalGridBackground";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   cwd: string;
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function EmptySession({ cwd, composer }: Props) {
+  const { t } = useI18n();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const arcadeEnabled = useSyncExternalStore(
     subscribeGridArcadeEnabled,
@@ -22,8 +24,8 @@ export function EmptySession({ cwd, composer }: Props) {
   );
   const project = looksLikeProject(cwd) ? basename(cwd) : null;
   const title = project
-    ? `What should we work on in ${project}?`
-    : "What should we work on?";
+    ? t("emptySession.workOnProject", { project })
+    : t("emptySession.workOn");
 
   return (
     <div

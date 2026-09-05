@@ -20,6 +20,7 @@ import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { useProjectBranchesState } from "../hooks/useProjectBranches";
 import { Popover } from "./Popover";
 import { SwitchBranchDialog } from "./SwitchBranchDialog";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   cwd: string;
@@ -49,6 +50,7 @@ export function BranchPicker({
   onChange,
   onClose,
 }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -239,13 +241,13 @@ export function BranchPicker({
   const missingGit = !current && !awaitingBranch;
   const label = current
     ? detached
-      ? `detached ${current}`
+      ? t("git.detachedAt", { branch: current })
       : current
-    : "No repo";
+    : t("git.noRepo");
   const title = awaitingBranch
-    ? "Loading branch…"
+    ? t("git.loadingBranch")
     : missingGit
-      ? "No git repository"
+      ? t("git.noGitRepo")
       : label;
   const interactive = enabled && !awaitingBranch && !missingGit;
 
@@ -257,10 +259,10 @@ export function BranchPicker({
           title={title}
           aria-label={
             awaitingBranch
-              ? "Loading branch"
+              ? t("git.loadingBranch")
               : missingGit
-                ? "No git repository"
-                : `Branch ${label}`
+                ? t("git.noGitRepo")
+                : t("git.branchLabel", { branch: label })
           }
           aria-expanded={missingGit ? undefined : open}
           aria-haspopup={missingGit ? undefined : "dialog"}
@@ -335,7 +337,7 @@ export function BranchPicker({
             maxHeight={MENU_MAX_HEIGHT}
             onDismiss={(reason) => dismiss(reason === "escape")}
             role="dialog"
-            aria-label="Branch picker"
+            aria-label={t("git.branchPicker")}
             data-branch-picker
             className="flex flex-col overflow-hidden"
           >
@@ -345,8 +347,8 @@ export function BranchPicker({
                 ref={search}
                 type="text"
                 value={query}
-                placeholder="Search or create a branch..."
-                aria-label="Search or create a branch"
+                placeholder={t("git.searchOrCreateBranch")}
+                aria-label={t("git.searchOrCreateBranch")}
                 spellCheck={false}
                 autoComplete="off"
                 autoCorrect="off"
@@ -365,7 +367,9 @@ export function BranchPicker({
               rows={rows}
               active={active}
               busy={busy}
-              emptyLabel={query.trim() ? "No matching branches" : "No branches"}
+              emptyLabel={
+                query.trim() ? t("git.noMatchingBranches") : t("git.noBranches")
+              }
               onActive={setActive}
               onPick={pick}
             />
@@ -396,6 +400,7 @@ function BranchList({
   onActive: (index: number) => void;
   onPick: (row: Row) => void;
 }) {
+  const { t } = useI18n();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeRef = useRef<HTMLButtonElement>(null);
 
@@ -413,7 +418,7 @@ function BranchList({
     <div
       ref={lockOverscroll}
       role="listbox"
-      aria-label="Branches"
+      aria-label={t("git.branches")}
       className="min-h-0 flex-1 overflow-y-auto overscroll-none px-1.5 py-1.5"
     >
       {rows.map((row, index) => {
@@ -452,7 +457,7 @@ function BranchList({
               <>
                 <Plus className="size-3.5 shrink-0" strokeWidth={1.75} />
                 <span className="min-w-0 truncate text-[12px]">
-                  Create and checkout {row.name}
+                  {t("git.createAndCheckout", { name: row.name })}
                 </span>
               </>
             ) : (

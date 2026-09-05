@@ -1,4 +1,20 @@
 import { ALT, IS_MAC, MOD, SHIFT } from "./platform";
+import {
+  t,
+  loadLanguage,
+  saveLanguage,
+  subscribeLanguage,
+  LANGUAGE_CHANGE_EVENT,
+  type Language,
+} from "./i18n";
+
+export {
+  loadLanguage,
+  saveLanguage,
+  subscribeLanguage,
+  LANGUAGE_CHANGE_EVENT,
+  type Language,
+};
 
 const SECTION_KEY = "monocode.settingsSection";
 
@@ -48,15 +64,11 @@ export function isSettingsSectionId(
 }
 
 export function settingsSectionLabel(id: SettingsSectionId): string {
-  return (
-    SETTINGS_SECTIONS.find((section) => section.id === id)?.label ?? "General"
-  );
+  return t(`settings.section.${id}.label`);
 }
 
 export function settingsSectionDescription(id: SettingsSectionId): string {
-  return (
-    SETTINGS_SECTIONS.find((section) => section.id === id)?.description ?? ""
-  );
+  return t(`settings.section.${id}.description`);
 }
 
 export function loadSettingsSection(): SettingsSectionId {

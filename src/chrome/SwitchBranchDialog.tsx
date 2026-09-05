@@ -2,6 +2,7 @@ import { Loader, WandSparkles } from "./icons";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { generateCommitMessage } from "../lib/harness";
+import { useI18n } from "../lib/i18n";
 import { LAYER } from "../lib/layers";
 import { MOD } from "../lib/platform";
 
@@ -28,6 +29,7 @@ export function SwitchBranchDialog({
   onCommit,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   const [message, setMessage] = useState("");
   const [generating, setGenerating] = useState(false);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -81,18 +83,22 @@ export function SwitchBranchDialog({
         role="dialog"
         aria-modal="true"
         aria-busy={Boolean(busy) || generating}
-        aria-label={creating ? `Create ${branch}` : `Switch to ${branch}`}
+        aria-label={
+          creating
+            ? t("git.createBranch", { branch })
+            : t("git.switchBranch", { branch })
+        }
         onMouseDown={(event) => event.stopPropagation()}
         className="absolute left-1/2 top-[22%] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col gap-3 rounded-lg border border-content/10 bg-content/5 p-4 shadow-xl backdrop-blur-xl"
       >
         <div className="flex flex-col gap-1">
           <h2 className="text-[13px] font-medium leading-tight text-content">
-            Uncommitted changes
+            {t("git.uncommittedChanges")}
           </h2>
           <p className="text-[12px] leading-snug text-content/55">
             {creating
-              ? `Creating “${branch}” would overwrite your local changes. Stash them for later, or commit them on this branch first.`
-              : `Switching to “${branch}” would overwrite your local changes. Stash them for later, or commit them on this branch first.`}
+              ? t("git.overwriteWarningCreate", { branch })
+              : t("git.overwriteWarningSwitch", { branch })}
           </p>
         </div>
 
@@ -101,9 +107,9 @@ export function SwitchBranchDialog({
             ref={messageRef}
             rows={1}
             value={message}
-            placeholder={`Message (${MOD}↩ to commit)`}
+            placeholder={t("git.commitShortcutHint", { shortcut: `${MOD}↩` })}
             disabled={Boolean(busy) || generating}
-            aria-label="Commit message"
+            aria-label={t("git.commitMessage")}
             className="max-h-40 w-full resize-none overflow-y-auto rounded-md bg-content/10 py-1 pr-8 pl-2 text-[13px] leading-5 text-content outline-none placeholder:text-content/35 disabled:opacity-40"
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={(event) => {
@@ -119,8 +125,8 @@ export function SwitchBranchDialog({
           />
           <button
             type="button"
-            title="Generate commit message"
-            aria-label="Generate commit message"
+            title={t("git.generateMessage")}
+            aria-label={t("git.generateMessage")}
             disabled={Boolean(busy) || generating}
             onClick={() => void generate()}
             className="absolute top-1 right-1 grid size-5 place-items-center rounded-md bg-content/10 text-content hover:bg-content/20 hover:text-content disabled:opacity-40"
@@ -146,7 +152,7 @@ export function SwitchBranchDialog({
             onClick={onCancel}
             className="rounded-md px-3 py-1.5 text-[12px] text-content/70 hover:bg-content/8 hover:text-content disabled:opacity-40"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -157,7 +163,7 @@ export function SwitchBranchDialog({
             {busy === "commit" ? (
               <Loader className="size-3.5 animate-spin" strokeWidth={1.75} />
             ) : null}
-            Commit & switch
+            {t("git.commitAndSwitch")}
           </button>
           <button
             type="button"
@@ -168,7 +174,7 @@ export function SwitchBranchDialog({
             {busy === "stash" ? (
               <Loader className="size-3.5 animate-spin" strokeWidth={1.75} />
             ) : null}
-            Stash & switch
+            {t("git.stashAndSwitch")}
           </button>
         </div>
       </div>

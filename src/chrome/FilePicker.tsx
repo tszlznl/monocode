@@ -20,6 +20,7 @@ import { looksLikeProject } from "../lib/recents";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { MatchText } from "./MatchText";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   open: boolean;
@@ -36,6 +37,7 @@ export function FilePicker({
   onOpenFile,
   onClose,
 }: Props) {
+  const { t } = useI18n();
   const search = useRef<HTMLInputElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -154,6 +156,7 @@ export function FilePicker({
     error,
     fileCount: files.length,
     matchCount: results.length,
+    t,
   });
 
   return createPortal(
@@ -161,7 +164,7 @@ export function FilePicker({
       <div className="absolute inset-0" onMouseDown={onClose} />
       <div
         role="dialog"
-        aria-label="Go to File"
+        aria-label={t("filePicker.title")}
         data-file-picker
         onMouseDown={(e) => e.stopPropagation()}
         className="absolute left-1/2 top-[12%] flex w-[min(560px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-content/10 bg-content/5 backdrop-blur-xl"
@@ -173,8 +176,8 @@ export function FilePicker({
               ref={search}
               type="text"
               value={query}
-              placeholder="Go to File"
-              aria-label="Go to File"
+              placeholder={t("filePicker.title")}
+              aria-label={t("filePicker.title")}
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
@@ -212,6 +215,7 @@ function emptyLabel({
   error,
   fileCount,
   matchCount,
+  t,
 }: {
   cwd: string;
   query: string;
@@ -219,13 +223,16 @@ function emptyLabel({
   error: string | null;
   fileCount: number;
   matchCount: number;
+  t: (key: string) => string;
 }): string | null {
   if (error && fileCount === 0) return error;
-  if (!looksLikeProject(cwd)) return "Open a project to search files";
-  if (loading && fileCount === 0) return "Indexing files…";
-  if (fileCount === 0) return "No files found";
+  if (!looksLikeProject(cwd)) return t("filePicker.openProjectHint");
+  if (loading && fileCount === 0) return t("filePicker.indexing");
+  if (fileCount === 0) return t("filePicker.noFiles");
   if (matchCount === 0) {
-    return query.trim() ? "No matching files" : "Type a file name to search";
+    return query.trim()
+      ? t("filePicker.noMatching")
+      : t("filePicker.typeToSearch");
   }
   return null;
 }
@@ -243,6 +250,7 @@ function FileList({
   onActive: (index: number) => void;
   onPick: (file: RankedFile) => void;
 }) {
+  const { t } = useI18n();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeRef = useRef<HTMLButtonElement>(null);
   const pointer = useRef({ x: Number.NaN, y: Number.NaN, allow: false });
@@ -278,7 +286,7 @@ function FileList({
     <div
       ref={lockOverscroll}
       role="listbox"
-      aria-label="Files"
+      aria-label={t("search.files")}
       onMouseMove={onListMouseMove}
       className="max-h-[min(380px,50vh)] overflow-y-auto overscroll-none px-1.5 pb-1.5"
     >

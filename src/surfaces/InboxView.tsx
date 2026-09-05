@@ -34,6 +34,7 @@ import { ProjectMascot } from "../chrome/ProjectMascot";
 import { OverlayNav } from "../chrome/TitleBar";
 import { WindowControls } from "../chrome/WindowControls";
 import { useDragResize } from "../hooks/useDragResize";
+import { useI18n } from "../lib/i18n";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { useTabGroupLogos } from "../hooks/useTabGroupLogos";
 import {
@@ -262,6 +263,7 @@ export function InboxView({
   onToggleSidebar,
   onStart,
 }: Props) {
+  const { t } = useI18n();
   const listLock = useLockOverscroll<HTMLDivElement>();
   const detailLock = useLockOverscroll<HTMLDivElement>();
   const onCloseRef = useRef(onClose);
@@ -471,7 +473,7 @@ export function InboxView({
     >
       <div
         role="tablist"
-        aria-label="Inbox source"
+        aria-label={t("inbox.source")}
         className="flex h-9 shrink-0 items-center gap-px border-b border-content/10 px-2"
       >
         <InboxSourceTab
@@ -491,8 +493,8 @@ export function InboxView({
           <input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Filter inbox"
-            aria-label="Filter inbox"
+            placeholder={t("inbox.filterInbox")}
+            aria-label={t("inbox.filterInbox")}
             spellCheck={false}
             autoComplete="off"
             className="h-7 w-full rounded-md bg-transparent pl-7 pr-2 text-[12px] text-content outline-none placeholder:text-content/40"
@@ -500,8 +502,8 @@ export function InboxView({
         </div>
         <button
           type="button"
-          title="Filter inbox"
-          aria-label="Filter inbox"
+          title={t("inbox.filterInbox")}
+          aria-label={t("inbox.filterInbox")}
           aria-expanded={!!filterMenu}
           aria-haspopup="menu"
           onClick={onFilterButtonClick}
@@ -513,8 +515,8 @@ export function InboxView({
         </button>
         <button
           type="button"
-          title="Mark all as read"
-          aria-label="Mark all as read"
+          title={t("inbox.markAllRead")}
+          aria-label={t("inbox.markAllRead")}
           disabled={!sourceHasUnseen}
           onClick={() => markInboxItemsSeen(sourceEntries)}
           className="grid size-6 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content/45"
@@ -523,7 +525,7 @@ export function InboxView({
         </button>
         <button
           type="button"
-          aria-label="Refresh"
+          aria-label={t("inbox.refresh")}
           onClick={() => setRefresh((value) => value + 1)}
           className="grid size-6 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content"
         >
@@ -552,16 +554,16 @@ export function InboxView({
             {narrowedByUser
               ? searchNarrowed
                 ? source === "linear"
-                  ? "No matching Linear issues"
-                  : "No matching issues or pull requests"
+                  ? t("inbox.noMatchingLinearIssues")
+                  : t("inbox.noMatchingGithubIssues")
                 : source === "linear"
-                  ? "No Linear issues match these filters"
-                  : "No issues or pull requests match these filters"
+                  ? t("inbox.noFilteredLinearIssues")
+                  : t("inbox.noFilteredGithubIssues")
               : source === "linear"
-                ? "No Linear issues"
+                ? t("inbox.noLinearIssues")
                 : projects.length === 0
-                  ? "Open a project to fill the inbox"
-                  : "No matching issues or pull requests"}
+                  ? t("inbox.openProjectToFill")
+                  : t("inbox.noMatchingGithubIssues")}
           </p>
         ) : (
           <ul className="flex flex-col gap-0.5 p-1.5">
@@ -598,7 +600,7 @@ export function InboxView({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize inbox list"
+        aria-label={t("inbox.resizeList")}
         className={`absolute inset-y-0 -right-px z-10 w-1.5 cursor-col-resize touch-none ${
           resize.dragging ? "bg-content/15" : "hover:bg-content/10"
         }`}
@@ -623,7 +625,7 @@ export function InboxView({
   return (
     <div
       role="region"
-      aria-label="Inbox"
+      aria-label={t("inbox.title")}
       data-app-inbox
       className="flex min-h-0 min-w-0 flex-1 flex-col text-content"
     >
@@ -678,12 +680,13 @@ function InboxDetailBody({
   revision?: number;
   onStart?: (item: InboxItem, body?: string) => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   if (!item) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
         <Inbox className="mb-3 size-6 text-content/30" strokeWidth={1.75} />
         <p className="text-[13px] text-content/45">
-          Select an issue or pull request
+          {t("inbox.selectIssueOrPr")}
         </p>
       </div>
     );
@@ -749,9 +752,10 @@ function InboxCard({
   mascotColor: string;
   onSelect: () => void;
 }) {
+  const { t } = useI18n();
   useInboxSeenTick();
   const status = inboxStatusMark(item);
-  const kindLabel = item.kind === "pr" ? "Pull request" : "Issue";
+  const kindLabel = item.kind === "pr" ? t("inbox.pullRequest") : t("inbox.issue");
   const time = formatRelativeTime(item.updatedAt);
   const name = projectName(item.projectPath);
   const linear = item.provider === "linear";
@@ -849,6 +853,7 @@ function InboxDetail({
   revision: number;
   onStart?: (item: InboxItem, body?: string) => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const linear = item.provider === "linear";
   const isPr = !linear && item.kind === "pr";
   const githubKind =
@@ -938,10 +943,10 @@ function InboxDetail({
     const pending = linear
       ? item.id
         ? linearIssueDetails(item.id)
-        : Promise.reject(new Error("Missing Linear issue"))
+        : Promise.reject(new Error(t("inbox.missingLinearIssue")))
       : githubKind
         ? githubWorkItemDetails(item.projectPath, githubKind, item.number)
-        : Promise.reject(new Error("Unknown inbox item"));
+        : Promise.reject(new Error(t("inbox.unknownInboxItem")));
     void pending
       .then((next) => {
         if (cancelled) return;
@@ -1074,7 +1079,7 @@ function InboxDetail({
         }
         return;
       }
-      if (!githubKind) throw new Error("Unknown inbox item");
+      if (!githubKind) throw new Error(t("inbox.unknownInboxItem"));
       await githubWorkItemComment(
         item.projectPath,
         githubKind,
@@ -1110,7 +1115,7 @@ function InboxDetail({
       <header className="flex flex-col gap-3">
         <div className="flex items-center gap-2 text-[12px] text-content/50">
           <InboxProviderMark provider={item.provider} className="size-3.5" />
-          <span>{item.kind === "pr" ? "Pull request" : "Issue"}</span>
+          <span>{item.kind === "pr" ? t("inbox.pullRequest") : t("inbox.issue")}</span>
           <span className="tabular-nums">{inboxItemRef(item)}</span>
           <span className={`flex items-center gap-1 ${statusMark.className}`}>
             <statusMark.Icon className="size-3.5" strokeWidth={1.75} />
@@ -1152,7 +1157,7 @@ function InboxDetail({
                   ))}
                 </span>
               ) : (
-                <span>Unassigned</span>
+                <span>{t("inbox.unassigned")}</span>
               )}
             </>
           ) : null}
@@ -1165,7 +1170,7 @@ function InboxDetail({
           {formatRelativeTime(item.updatedAt) ? (
             <>
               <span aria-hidden>·</span>
-              <span>Updated {formatRelativeTime(item.updatedAt)}</span>
+              <span>{t("inbox.updated", { time: formatRelativeTime(item.updatedAt) })}</span>
             </>
           ) : null}
           {baseRef && headRef ? (
@@ -1220,7 +1225,7 @@ function InboxDetail({
                 }}
                 className="inline-flex items-center gap-1 rounded-md bg-content px-3 h-6.5 text-[12px] text-background-base hover:bg-content/80 disabled:cursor-default disabled:opacity-40"
               >
-                {starting ? "Sending..." : "Send to agent"}
+                {starting ? t("inbox.sending") : t("inbox.sendToAgent")}
               </button>
               {linear ? (
                 <InboxProjectPicker
@@ -1242,10 +1247,10 @@ function InboxDetail({
           >
             <ExternalLink className="size-3.5" strokeWidth={1.75} />
             {item.kind === "pr"
-              ? "Review on GitHub"
+              ? t("inbox.reviewOnGithub")
               : linear
-                ? "Open in Linear"
-                : "Open on GitHub"}
+                ? t("inbox.openInLinear")
+                : t("inbox.openOnGithub")}
           </button>
         </div>
         {startError ? (
@@ -1255,16 +1260,16 @@ function InboxDetail({
       {isPr ? (
         <div
           role="tablist"
-          aria-label="Pull request sections"
+          aria-label={t("inbox.sections")}
           className="flex h-9 gap-4 items-stretch border-b border-content/10"
         >
           <InboxDetailTab
-            label="Summary"
+            label={t("inbox.summary")}
             selected={tab === "summary"}
             onSelect={() => setTab("summary")}
           />
           <InboxDetailTab
-            label="Code"
+            label={t("inbox.code")}
             selected={tab === "code"}
             onSelect={() => setTab("code")}
           />
@@ -1285,7 +1290,7 @@ function InboxDetail({
             diff={prDiff}
           />
         ) : (
-          <p className="text-[13px] text-content/45">No file changes</p>
+          <p className="text-[13px] text-content/45">{t("inbox.noFileChanges")}</p>
         )
       ) : loading ? (
         <div className="flex justify-center py-10 text-content/40">
@@ -1302,7 +1307,7 @@ function InboxDetail({
               allowRemoteMedia
             />
           ) : (
-            <p className="text-[13px] text-content/45">No description</p>
+            <p className="text-[13px] text-content/45">{t("inbox.noDescription")}</p>
           )}
           <InboxComments
             thread={thread}
@@ -1388,6 +1393,7 @@ function InboxProjectPicker({
   value: string;
   onChange: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -1429,7 +1435,7 @@ function InboxProjectPicker({
       >
         {selected ? <InboxProjectMark project={selected} /> : null}
         <span className="min-w-0 truncate">
-          {selected?.name ?? "Choose project"}
+          {selected?.name ?? t("inbox.chooseProject")}
         </span>
         <ChevronDown
           className="size-3 shrink-0 text-content/45"

@@ -2,6 +2,7 @@ import { CircleDot, GitPullRequest, X } from "./icons";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { GithubLabel, InboxComposerCard } from "../lib/githubTasks";
 import { InboxProviderMark } from "./InboxProviderMark";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   card: InboxComposerCard;
@@ -9,8 +10,9 @@ type Props = {
 };
 
 export function InboxMiniCard({ card, onDismiss }: Props) {
+  const { t } = useI18n();
   const KindIcon = card.kind === "pr" ? GitPullRequest : CircleDot;
-  const kindLabel = card.kind === "pr" ? "Pull request" : "Issue";
+  const kindLabel = card.kind === "pr" ? t("inbox.pullRequest") : t("inbox.issue");
   const providerLabel = card.provider === "linear" ? "Linear" : "GitHub";
 
   return (
@@ -18,8 +20,8 @@ export function InboxMiniCard({ card, onDismiss }: Props) {
       <div className="relative rounded-md border border-content/10 bg-content/6 px-2.5 py-2 pr-8">
         <button
           type="button"
-          title={`Open in ${providerLabel}`}
-          aria-label={`Open ${kindLabel} ${card.identifier} in ${providerLabel}`}
+          title={t("inbox.openInProvider", { provider: providerLabel })}
+          aria-label={t("inbox.openItemInProvider", { kind: kindLabel, identifier: card.identifier, provider: providerLabel })}
           disabled={!card.url}
           onClick={() => {
             if (card.url) void openUrl(card.url);
@@ -62,8 +64,8 @@ export function InboxMiniCard({ card, onDismiss }: Props) {
         {onDismiss ? (
           <button
             type="button"
-            title="Remove"
-            aria-label={`Remove ${kindLabel} ${card.identifier}`}
+            title={t("common.remove")}
+            aria-label={t("inbox.removeItem", { kind: kindLabel, identifier: card.identifier })}
             onClick={onDismiss}
             className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded text-content/40 hover:bg-content/10 hover:text-content"
           >

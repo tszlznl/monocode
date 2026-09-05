@@ -45,6 +45,7 @@ import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { HarnessIcon } from "./HarnessIcon";
 import { Popover } from "./Popover";
 import { MOD } from "../lib/platform";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   harness: HarnessId;
@@ -65,6 +66,7 @@ export function ModelPicker({
   onChange,
   onClose,
 }: Props) {
+  const { t } = useI18n();
   const catalogVersion = useSyncExternalStore(
     subscribeModels,
     getModelSnapshot,
@@ -333,19 +335,19 @@ export function ModelPicker({
           onDismiss={() => dismiss(false)}
           dismissOnEscape={false}
           role="dialog"
-          aria-label="Model picker"
+          aria-label={t("modelPicker.title")}
           data-model-picker
           className="flex flex-col overflow-hidden"
         >
           <nav
             role="tablist"
-            aria-label="Providers"
+            aria-label={t("modelPicker.providers")}
             aria-keyshortcuts="ArrowLeft ArrowRight"
             aria-orientation="horizontal"
             className="flex w-full shrink-0 items-stretch border-b border-content/10"
           >
             <ProviderTabButton
-              title="Favorites"
+              title={t("modelPicker.favorites")}
               selected={visibleTab === "favorites"}
               onSelect={() => selectTab("favorites")}
             >
@@ -375,8 +377,8 @@ export function ModelPicker({
                   ref={search}
                   type="text"
                   value={query}
-                  placeholder="Search models..."
-                  aria-label="Search models"
+                  placeholder={t("modelPicker.searchModels")}
+                  aria-label={t("modelPicker.searchModels")}
                   className="min-w-0 flex-1 bg-transparent text-[12px] text-content outline-none placeholder:text-content/40"
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
@@ -390,13 +392,13 @@ export function ModelPicker({
               favorites={favorites}
               emptyLabel={
                 visibleTab === "favorites" && !query.trim()
-                  ? "No favorite models"
+                  ? t("modelPicker.noFavorites")
                   : visibleTab !== "favorites" &&
                       !isHarnessAvailable(visibleTab)
                     ? harnessUnavailableHint(visibleTab)
                     : visibleTab === "codex" && !query.trim()
-                      ? "Loading Codex models…"
-                      : "No matching models"
+                      ? t("modelPicker.loadingCodex")
+                      : t("modelPicker.noMatchingModels")
               }
               onActive={setActive}
               onPick={pick}
@@ -471,6 +473,7 @@ function ModelList({
   onPick: (model: AgentModel) => void;
   onToggleFavorite: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const listRef = useRef<HTMLDivElement>(null);
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeRef = useRef<HTMLDivElement>(null);
@@ -507,7 +510,7 @@ function ModelList({
     <div
       ref={setListRef}
       role="listbox"
-      aria-label="Models"
+      aria-label={t("modelPicker.models")}
       className="min-h-0 flex-1 overflow-y-auto overscroll-none px-1.5 pb-1.5"
     >
       {models.map((item, index) => {
@@ -570,9 +573,9 @@ function ModelList({
             </button>
             <button
               type="button"
-              title={favorited ? "Remove from favorites" : "Add to favorites"}
+              title={favorited ? t("modelPicker.unfavorite") : t("modelPicker.favorite")}
               aria-label={
-                favorited ? "Remove from favorites" : "Add to favorites"
+                favorited ? t("modelPicker.unfavorite") : t("modelPicker.favorite")
               }
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {

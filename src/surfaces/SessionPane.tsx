@@ -41,6 +41,7 @@ import { loadNotesEnabled, subscribeNotesEnabled } from "../lib/settings";
 import { resolveModel } from "../lib/models";
 import { isAstraModel } from "../lib/astraWelcome";
 import { AstraWelcome } from "./AstraWelcome";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   session: Session;
@@ -158,6 +159,7 @@ export const SessionPane = memo(function SessionPane({
   onNewTerminal,
   onPaneDragStart,
 }: Props) {
+  const { t } = useI18n();
   const title = sessionDisplayTitle(session.title, session.harness);
   const approve = useCallback(
     (requestId: number, decision: ApprovalDecision) =>
@@ -358,8 +360,8 @@ export const SessionPane = memo(function SessionPane({
           </span>
           <button
             type="button"
-            title={`Close Pane (${MOD}W)`}
-            aria-label="Close pane"
+            title={`${t("session.closePane")} (${MOD}W)`}
+            aria-label={t("session.closePane")}
             data-no-drag
             className="grid size-5 shrink-0 place-items-center rounded text-content/50 hover:bg-content/10 hover:text-content"
             onPointerDown={(e) => e.stopPropagation()}
@@ -415,8 +417,8 @@ export const SessionPane = memo(function SessionPane({
               <div className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center">
                 <button
                   type="button"
-                  title="Jump to latest"
-                  aria-label="Jump to latest"
+                  title={t("session.jumpToLatest")}
+                  aria-label={t("session.jumpToLatest")}
                   data-jump-to-bottom
                   onClick={() => jumpToBottomRef.current?.()}
                   className="pointer-events-auto grid size-6 place-items-center rounded-md border border-content/15 bg-content/10 text-content shadow-md hover:bg-content/5 backdrop-blur-md"

@@ -18,6 +18,7 @@ import {
   CREATE_SKILL_DESCRIPTION,
   CREATE_SKILL_NAME,
 } from "./createSkill";
+import { t } from "./i18n";
 
 export type SkillScope = "project" | "user" | "builtin";
 export type SkillSource =
@@ -512,7 +513,7 @@ export async function createBlankSkill(input: {
 }): Promise<string> {
   const name = slugSkillName(input.name);
   if (!isValidSkillName(name)) {
-    throw new Error("Use a lowercase name with letters, numbers, and hyphens.");
+    throw new Error(t("skillPicker.nameValidationHint"));
   }
   const root =
     input.scope === "user" || !looksLikeProject(input.cwd)

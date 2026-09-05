@@ -6,12 +6,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  RUNTIME_MODE_HINT,
-  RUNTIME_MODE_LABEL,
   RUNTIME_MODES,
   type RuntimeMode,
 } from "../lib/session";
 import { Popover } from "./Popover";
+import { useI18n } from "../lib/i18n";
 
 type Props = {
   value: RuntimeMode;
@@ -28,7 +27,34 @@ const ICONS: Record<RuntimeMode, typeof Lock> = {
   "full-access": LockOpen,
 };
 
+function getRuntimeModeLabel(mode: RuntimeMode, t: (key: string) => string): string {
+  switch (mode) {
+    case "supervised":
+      return t("runtimeMode.supervised.label");
+    case "auto-accept-edits":
+      return t("runtimeMode.autoAcceptEdits.label");
+    case "auto":
+      return t("runtimeMode.auto.label");
+    case "full-access":
+      return t("runtimeMode.fullAccess.label");
+  }
+}
+
+function getRuntimeModeHint(mode: RuntimeMode, t: (key: string) => string): string {
+  switch (mode) {
+    case "supervised":
+      return t("runtimeMode.supervised.hint");
+    case "auto-accept-edits":
+      return t("runtimeMode.autoAcceptEdits.hint");
+    case "auto":
+      return t("runtimeMode.auto.hint");
+    case "full-access":
+      return t("runtimeMode.fullAccess.hint");
+  }
+}
+
 export function AccessPicker({ value, onChange, onClose }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(() =>
     Math.max(0, RUNTIME_MODES.indexOf(value)),
@@ -71,12 +97,15 @@ export function AccessPicker({ value, onChange, onClose }: Props) {
     }
   };
 
+  const currentLabel = getRuntimeModeLabel(value, t);
+  const currentHint = getRuntimeModeHint(value, t);
+
   return (
     <div ref={root} className="relative">
       <button
         type="button"
-        title={RUNTIME_MODE_HINT[value]}
-        aria-label={RUNTIME_MODE_LABEL[value]}
+        title={currentHint}
+        aria-label={currentLabel}
         aria-expanded={open}
         aria-haspopup="listbox"
         onMouseDown={(e) => e.preventDefault()}
@@ -95,7 +124,7 @@ export function AccessPicker({ value, onChange, onClose }: Props) {
       >
         <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
         <span className="min-w-0 truncate text-[11px]">
-          {RUNTIME_MODE_LABEL[value]}
+          {currentLabel}
         </span>
         <ChevronDown
           className={`size-3 shrink-0 text-content/50 ${open ? "rotate-180" : ""}`}
@@ -110,7 +139,7 @@ export function AccessPicker({ value, onChange, onClose }: Props) {
           autoFocus
           onDismiss={(reason) => dismiss(reason === "escape")}
           role="listbox"
-          aria-label="Access"
+          aria-label={t("runtimeMode.title")}
           data-access-picker
           tabIndex={-1}
           onKeyDown={onMenuKey}
@@ -141,10 +170,10 @@ export function AccessPicker({ value, onChange, onClose }: Props) {
                 />
                 <span className="min-w-0">
                   <span className="block text-[13px] font-medium leading-5">
-                    {RUNTIME_MODE_LABEL[mode]}
+                    {getRuntimeModeLabel(mode, t)}
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-4 text-content/50">
-                    {RUNTIME_MODE_HINT[mode]}
+                    {getRuntimeModeHint(mode, t)}
                   </span>
                 </span>
               </button>
