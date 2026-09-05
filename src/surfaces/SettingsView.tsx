@@ -1,6 +1,7 @@
 import {
   ArrowDownCircle,
   Check,
+  ChevronDown,
   Loader,
   RefreshCw,
   RotateCcw,
@@ -13,10 +14,12 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { HarnessIcon } from "../chrome/HarnessIcon";
 import { InboxProviderMark } from "../chrome/InboxProviderMark";
+import { Popover } from "../chrome/Popover";
 import { RemoveProjectDialog } from "../chrome/RemoveProjectDialog";
 import { WindowControls } from "../chrome/WindowControls";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
@@ -1410,6 +1413,9 @@ function Toggle({
   );
 }
 
+const SELECT_WIDTH = 240;
+const SELECT_MAX_HEIGHT = 280;
+
 function Select({
   label,
   value,
@@ -1421,19 +1427,121 @@ function Select({
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(() =>
+    Math.max(
+      0,
+      options.findIndex((option) => option.value === value),
+    ),
+  );
+  const root = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLDivElement>(null);
+  const current = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    setActive(
+      Math.max(
+        0,
+        options.findIndex((option) => option.value === value),
+      ),
+    );
+  }, [open, options, value]);
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  const pick = (next: string) => {
+    onChange(next);
+    setOpen(false);
+  };
+
+  const onTriggerKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      setActive((i) =>
+        event.key === "ArrowDown"
+          ? Math.min(options.length - 1, i + 1)
+          : Math.max(0, i - 1),
+      );
+      return;
+    }
+    if (event.key === "Enter" && open) {
+      event.preventDefault();
+      const option = options[active];
+      if (option) pick(option.value);
+    }
+  };
+
   return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="max-w-52 rounded-md border border-content/10 bg-content/5 px-2 py-1 text-[12px] text-content outline-none hover:border-content/20"
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <div ref={root} className="relative">
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onTriggerKey}
+        className="flex h-6.5 max-w-52 items-center gap-1 rounded-md px-1.5 bg-content/10 text-content hover:bg-content/15"
+      >
+        <span className="min-w-0 truncate text-[12px]">
+          {current?.label ?? label}
+        </span>
+        <ChevronDown
+          className={`size-3 shrink-0 text-content/50 ${open ? "rotate-180" : ""}`}
+          strokeWidth={1.75}
+        />
+      </button>
+      {open ? (
+        <Popover
+          anchor={root}
+          side="bottom"
+          width={SELECT_WIDTH}
+          maxHeight={SELECT_MAX_HEIGHT}
+          onDismiss={() => setOpen(false)}
+          role="listbox"
+          aria-label={label}
+          className="flex flex-col overflow-hidden"
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-none px-1.5 py-1.5">
+            {options.map((option, index) => {
+              const selected = option.value === value;
+              const highlighted = index === active;
+              return (
+                <div
+                  key={option.value}
+                  ref={highlighted ? activeRef : undefined}
+                  onMouseEnter={() => setActive(index)}
+                  className={`flex w-full items-center rounded-lg px-1 ${
+                    highlighted || selected ? "bg-content/10" : "hover:bg-content/5"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pick(option.value)}
+                    className="flex min-w-0 flex-1 items-center justify-between gap-2 px-1.5 py-2 text-left text-[12px] text-content"
+                  >
+                    <span className="min-w-0 truncate">{option.label}</span>
+                    {selected ? (
+                      <Check
+                        className="size-3.5 shrink-0 text-content"
+                        strokeWidth={1.75}
+                      />
+                    ) : null}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </Popover>
+      ) : null}
+    </div>
   );
 }
 
