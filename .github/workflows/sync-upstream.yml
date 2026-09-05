@@ -1,0 +1,79 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/hardbeat920/monocode.git
+          git fetch upstream main
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          set -euo pipefail
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "Commits behind upstream: $BEHIND"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" = "0" ]; then
+            echo "Already up to date."
+          else
+            git merge --no-edit upstream/main
+            git push origin main
+            VERSION=$(node -p "require('./package.json').version")
+            echo "Merged upstream; version is now $VERSION."
+          fi
+
+      - name: Open issue when merge conflicts
+        if: failure() && steps.merge.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git merge --abort || true
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Upstream sync needs manual merge" \
+            --body "The scheduled sync from hardbeat920/monocode hit merge conflicts. Run the merge locally: git fetch upstream && git merge upstream/main"
+
+      - name: Tag synced version
+        if: success()
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists."
+          else
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "Tagged v$VERSION; fork build will attach installers to the release."
+          fi

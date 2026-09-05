@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   release:
+    if: github.repository == 'hardbeat920/monocode'
     needs: linux
     runs-on: macos-latest
     steps:
@@ -192,6 +193,7 @@ jobs:
 
   linux:
     name: Linux packages
+    if: github.repository == 'hardbeat920/monocode'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

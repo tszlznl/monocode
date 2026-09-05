@@ -2000,9 +2000,7 @@ fn which_in_path(path: &str, name: &str) -> Option<PathBuf> {
             continue;
         }
         for ext in extensions {
-            let candidate = if ext.is_empty() {
-                dir.join(name)
-            } else if name.ends_with(ext) {
+            let candidate = if ext.is_empty() || name.ends_with(ext) {
                 dir.join(name)
             } else {
                 dir.join(format!("{name}{ext}"))
@@ -2027,9 +2025,7 @@ fn which_all_in_path(path: &str, name: &str) -> Vec<PathBuf> {
             continue;
         }
         for ext in extensions {
-            let candidate = if ext.is_empty() {
-                dir.join(name)
-            } else if name.ends_with(ext) {
+            let candidate = if ext.is_empty() || name.ends_with(ext) {
                 dir.join(name)
             } else {
                 dir.join(format!("{name}{ext}"))

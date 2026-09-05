@@ -3838,7 +3838,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
         if !status.success() {
             return Err("Could not reveal in File Explorer.".into());
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
