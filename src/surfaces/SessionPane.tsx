@@ -238,6 +238,7 @@ export const SessionPane = memo(function SessionPane({
   const isEmpty = session.blocks.length === 0;
   const showDeckProjectPicker = isEmpty && !looksLikeProject(session.cwd);
   const dockComposer = !isEmpty || inSplit;
+  const draftRef = useRef<string | undefined>(undefined);
   const composer = (
     <Composer
       enabled={visible}
@@ -250,16 +251,21 @@ export const SessionPane = memo(function SessionPane({
       runtimeMode={session.runtimeMode}
       cwd={session.cwd}
       executionCwd={workCwd}
+      sessionId={session.id}
       compactSupported={canCompactHarnessContext(session.harness)}
       recents={recents}
       hideProjectPicker={hideProjectPicker ? !showDeckProjectPicker : false}
       context={session.context}
       quoteRequest={quoteRequest}
       initialDraft={
-        session.inboxCard || session.noteCard || session.handoffCard
+        draftRef.current ??
+        (session.inboxCard || session.noteCard || session.handoffCard
           ? undefined
-          : session.composerSeed
+          : session.composerSeed)
       }
+      onDraftChange={(text) => {
+        draftRef.current = text;
+      }}
       inboxCard={session.inboxCard}
       noteCard={session.noteCard}
       handoffCard={session.handoffCard}

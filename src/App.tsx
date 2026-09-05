@@ -202,17 +202,18 @@ import {
   loadRecents,
   looksLikeProject,
   normalizeProjectPath,
+  projectRailItems,
   rememberProject,
   sameProjectPath,
 } from "./lib/recents";
 import {
-  applyDeletedSessionToWorkspace,
   applyPlaceSessionOnPane,
   filterTabsForProject,
   findTabForProject,
   planWorkspaceTabClose,
   workspaceTabCwd,
 } from "./lib/workspaceTabGroups";
+import { runSessionRemoval } from "./lib/sessionRemoval";
 import {
   HARNESS_LABEL,
   HARNESS_TITLE,
@@ -260,8 +261,10 @@ import { hiddenApprovalNotices } from "./lib/approvalToast";
 import { nextUnseenFinishedSessions } from "./lib/sessionDone";
 import { playCue } from "./lib/sounds";
 import {
+  adjacentItemId,
   deferUnhandledEscape,
   focusedBusyAgentSessionId,
+  shouldHandleListNavigation,
   shouldStopFocusedTurnOnEscape,
   tabCommand,
 } from "./lib/tabKeys";
@@ -276,8 +279,8 @@ import {
   type TabVisitHistory,
 } from "./lib/tabVisitHistory";
 import { preparePrompt } from "./lib/promptPreparation";
-import { warmPiSkills } from "./lib/skills";
-import { piSkillContextForSession } from "./lib/sessionSkills";
+import { warmNativeSkills, isNativeCommandPrompt } from "./lib/skills";
+import { nativeSkillContextForSession } from "./lib/sessionSkills";
 import {
   ADD_NOTE_TO_CHAT_EVENT,
   composeNoteMessage,
@@ -476,6 +479,13 @@ function openSessionIds(tabs: WorkspaceTab[]): Set<string> {
   return ids;
 }
 
+function filesInWorkspaceTabs(tabs: readonly WorkspaceTab[]): FilePaneTab[] {
+  return tabs.flatMap((tab) => [
+    ...tab.editorPanes.flatMap((pane) => pane.files),
+    ...(tab.terminalPanes ?? []).flatMap((pane) => pane.files),
+  ]);
+}
+
 /** Native sheet. `window.confirm` is swallowed when a macOS menu accelerator fires. */
 function confirmDiscardUnsaved(message: string): Promise<boolean> {
   return ask(message, { title: "MonoCode", kind: "warning" });
@@ -498,11 +508,15 @@ function titleTabsEqual(a: TitleTab[], b: TitleTab[]): boolean {
       tab.files.join("\u0000") === other.files.join("\u0000") &&
       tab.multiPane === other.multiPane &&
       tab.fileFocused === other.fileFocused &&
+      tab.blank === other.blank &&
       tab.terminal === other.terminal &&
       tab.groupId === other.groupId
     );
   });
 }
+
+// Register capabilities before composer hooks choose their discovery strategy.
+registerBuiltinHarnesses();
 
 export default function App({
   windowTransfer = null,
@@ -642,6 +656,13 @@ export default function App({
   inboxViewOpenRef.current = inboxViewOpen;
   const notesViewOpenRef = useRef(notesViewOpen);
   notesViewOpenRef.current = notesViewOpen;
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
+  const sessionNavigationIdsRef = useRef<readonly string[]>([]);
+  const filePickerOpenRef = useRef(filePickerOpen);
+  filePickerOpenRef.current = filePickerOpen;
+  const whatsNewVersionRef = useRef(whatsNewVersion);
+  whatsNewVersionRef.current = whatsNewVersion;
 
   useEffect(() => {
     if (!notesEnabled) setNotesViewOpen(false);
@@ -662,6 +683,7 @@ export default function App({
   const workspaceSyncKey = useRef<string | null>(null);
   const observedSessions = useRef(new Map<string, Session>());
   const pendingPersist = useRef(new Map<string, Session>());
+  const removingSessionIds = useRef(new Set<string>());
   // Tokens arrive many times per frame; apply them once so React/markdown aren't
   // recomputed for every delta.
   const harnessQueued = useRef(new Map<string, HarnessEvent[]>());
@@ -701,6 +723,27 @@ export default function App({
     syncDockBadge(next);
     setSessions(next);
   }, []);
+
+  const stopSessionForRemoval = useCallback(
+    async (sessionId: string): Promise<Session | undefined> => {
+      const open = sessionsRef.current.find((session) => session.id === sessionId);
+      if (!open?.busy) return open;
+
+      turnGen.current.set(
+        sessionId,
+        (turnGen.current.get(sessionId) ?? 0) + 1,
+      );
+      flushHarnessEvents();
+      await Promise.all(
+        sessionChildHarnesses(open).map((harness) =>
+          cancelHarnessTurn(harness, sessionId).catch(() => undefined),
+        ),
+      );
+      flushHarnessEvents();
+      return sessionsRef.current.find((session) => session.id === sessionId);
+    },
+    [flushHarnessEvents],
+  );
 
   const applyApprovalEvent = useCallback(
     (sessionId: string, event: HarnessEvent) => {
@@ -744,7 +787,6 @@ export default function App({
   );
 
   useEffect(() => {
-    registerBuiltinHarnesses();
     if (resumed?.sessions.length) bindResumedSessions(resumed.sessions);
     const stopBridge = startHarnessBridge();
     const reap = () => {
@@ -810,13 +852,13 @@ export default function App({
       (session) => activeTab && leafIds(activeTab.layout).includes(session.id),
     );
   const sessionDefaults = active ?? sessions[0];
-  const activeSkillContext = active ? piSkillContextForSession(active) : null;
+  const activeSkillContext = active ? nativeSkillContextForSession(active) : null;
   const activeSkillCwd = activeSkillContext?.cwd;
 
   useEffect(() => {
     if (!activeSkillContext || !activeSkillCwd) return;
-    warmPiSkills(activeSkillContext);
-  }, [activeSkillCwd]);
+    warmNativeSkills(activeSkillContext);
+  }, [activeSkillCwd, active?.id, active?.harness]);
 
   const sidebarCwd =
     active?.cwd ??
@@ -1037,7 +1079,11 @@ export default function App({
   }, [sidebarCwd]);
 
   const persistSession = useCallback((session: Session | undefined) => {
-    if (!session || !shouldPersistSession(session)) return;
+    if (
+      !session ||
+      !shouldPersistSession(session) ||
+      removingSessionIds.current.has(session.id)
+    ) return;
     const fingerprint = persistFingerprint(session);
     void upsertSession(session)
       .then((summary) => {
@@ -1054,6 +1100,7 @@ export default function App({
     const liveIds = new Set(sessions.map((session) => session.id));
     const visibleIds = openSessionIds(tabsRef.current);
     for (const session of sessions) {
+      if (removingSessionIds.current.has(session.id)) continue;
       if (observedSessions.current.get(session.id) === session) continue;
       observedSessions.current.set(session.id, session);
       const parked = !visibleIds.has(session.id);
@@ -1096,6 +1143,7 @@ export default function App({
       pendingPersist.current.clear();
       void Promise.all(
         dirty.map(async (session) => {
+          if (removingSessionIds.current.has(session.id)) return;
           const fingerprint = persistFingerprint(session);
           if (lastPersisted.current.get(session.id) === fingerprint) return;
           const summary = await upsertSession(session).catch(() => null);
@@ -2094,6 +2142,23 @@ export default function App({
     ],
   );
 
+  const onCloseTitleTab = useCallback(
+    (id: string) => {
+      const closePlan = planWorkspaceTabClose({
+        tabs: tabsRef.current,
+        sessions: sessionsRef.current,
+        closingTabId: id,
+        scope: tabCloseScope,
+      });
+      if (closePlan.action === "keep" && id === activeTabIdRef.current) {
+        onClosePane();
+        return;
+      }
+      onCloseTab(id);
+    },
+    [onClosePane, onCloseTab, tabCloseScope],
+  );
+
   const deckProjectTabs = useMemo(() => {
     // A projectless session belongs to no project, so it stands on its own
     // rather than trailing the last project's tabs.
@@ -2491,30 +2556,175 @@ export default function App({
     [persistSession, refreshHistory, sidebarCwd],
   );
 
-  const onArchiveHistorySession = useCallback(
-    async (sessionId: string, archived: boolean) => {
+  const onRemoveHistorySession = useCallback(
+    async (sessionId: string, mode: "archive" | "delete") => {
+      if (removingSessionIds.current.has(sessionId)) return;
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
-      if (open && shouldPersistSession(open)) {
-        await upsertSession(open).catch(() => undefined);
-      }
-      await setSessionArchived(sessionId, archived).catch(() => undefined);
-      setHistory((current) => {
-        const existing = current.find((entry) => entry.id === sessionId);
-        if (existing) {
-          return current.map((entry) =>
-            entry.id === sessionId ? { ...entry, archived } : entry,
-          );
-        }
-        if (!open) return current;
-        return mergeHistorySummary(current, {
-          ...summaryFromSession(open),
-          archived,
+      const summary = history.find((entry) => entry.id === sessionId);
+      const seed = open ?? summary;
+      const label = seed
+        ? sessionDisplayTitle(seed.title, seed.harness)
+        : "this session";
+      if (mode === "delete" && !window.confirm(`Delete “${label}”?`)) return;
+
+      removingSessionIds.current.add(sessionId);
+      pendingPersist.current.delete(sessionId);
+      let savedSummary: SessionSummary | undefined;
+      try {
+        await runSessionRemoval({
+          sessionId,
+          scope: tabCloseScope,
+          readWorkspace: () => ({
+            tabs: tabsRef.current,
+            sessions: sessionsRef.current,
+            activeTabId: activeTabIdRef.current,
+            dirtyFiles: dirtyFilesRef.current,
+          }),
+          createReplacement: (latest) =>
+            newSession(
+              latest?.harness ?? seed?.harness ?? "cursor",
+              latest?.cwd ?? seed?.cwd ?? sidebarCwd,
+              latest?.model ?? seed?.model,
+              latest?.runtimeMode ?? seed?.runtimeMode,
+              latest?.modelSettings ?? open?.modelSettings,
+            ),
+          confirmClose: async (closedTabs) => {
+            const files = filesInWorkspaceTabs(closedTabs);
+            const unsaved = files.some(
+              (file) =>
+                isFilesystemTab(file) && dirtyFilesRef.current.has(file.id),
+            );
+            if (
+              unsaved &&
+              !(await confirmDiscardUnsaved(
+                `${mode === "archive" ? "Archive" : "Delete"} this conversation with unsaved files?`,
+              ))
+            )
+              return false;
+            const terminals = files.filter((file) => file.terminal);
+            return (
+              terminals.length === 0 || (await confirmCloseTerminals(terminals))
+            );
+          },
+          stop: async () => {
+            await stopSessionForRemoval(sessionId);
+          },
+          updateSession: (stopped) => {
+            const next = sessionsRef.current.map((session) =>
+              session.id === sessionId ? stopped : session,
+            );
+            sessionsRef.current = next;
+            setSessions(next);
+          },
+          persist: async (latest) => {
+            if (latest) await flushSessionCheckpoint(sessionId);
+            if (mode === "delete") {
+              await deleteSession(sessionId);
+              return;
+            }
+            if (latest && shouldPersistSession(latest)) {
+              const saved = await upsertSession(latest);
+              if (!saved)
+                throw new Error("The conversation could not be saved.");
+              savedSummary = saved;
+            }
+            await setSessionArchived(sessionId, true);
+          },
+          commit: (removal) => {
+            const latest = sessionsRef.current.find(
+              (session) => session.id === sessionId,
+            );
+            const harnesses: HarnessId[] = latest
+              ? sessionChildHarnesses(latest)
+              : [seed?.harness ?? "cursor"];
+            for (const harness of harnesses) {
+              void forgetHarnessSession(harness, sessionId);
+            }
+            lastPersisted.current.delete(sessionId);
+            pendingPersist.current.delete(sessionId);
+            const closingFiles = filesInWorkspaceTabs(removal.closedTabs);
+            setDirtyFiles((current) => {
+              const next = new Set(current);
+              for (const file of closingFiles) next.delete(file.id);
+              return next;
+            });
+            sessionsRef.current = removal.sessions;
+            tabsRef.current = removal.tabs;
+            setSessions(removal.sessions);
+            setTabs(removal.tabs);
+            if (removal.activeTabId !== activeTabIdRef.current) {
+              activateTab(removal.activeTabId);
+            }
+            const activeTab = removal.tabs.find(
+              (tab) => tab.id === removal.activeTabId,
+            );
+            setComposerFocused(
+              removal.sessions.some(
+                (session) => session.id === activeTab?.focusedId,
+              ),
+            );
+            if (mode === "archive") {
+              const archived =
+                savedSummary ??
+                summary ??
+                (latest && summaryFromSession(latest));
+              if (archived) {
+                setHistory((current) =>
+                  mergeHistorySummary(current, { ...archived, archived: true }),
+                );
+              }
+            } else {
+              setHistory((current) =>
+                current.filter((entry) => entry.id !== sessionId),
+              );
+              void refreshHistory(sidebarCwd);
+            }
+          },
         });
-      });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        void message(`Could not ${mode} this conversation.\n\n${detail}`, {
+          title: "MonoCode",
+          kind: "error",
+        });
+      } finally {
+        removingSessionIds.current.delete(sessionId);
+      }
     },
-    [],
+    [
+      activateTab,
+      history,
+      refreshHistory,
+      sidebarCwd,
+      stopSessionForRemoval,
+      tabCloseScope,
+    ],
+  );
+
+  const onArchiveHistorySession = useCallback(
+    async (sessionId: string, archived: boolean) => {
+      if (archived) return onRemoveHistorySession(sessionId, "archive");
+      if (removingSessionIds.current.has(sessionId)) return;
+      try {
+        await setSessionArchived(sessionId, false);
+        setHistory((current) =>
+          current.map((entry) =>
+            entry.id === sessionId ? { ...entry, archived: false } : entry,
+          ),
+        );
+      } catch (error) {
+        void message(
+          `Could not unarchive this conversation.\n\n${String(error)}`,
+          {
+            title: "MonoCode",
+            kind: "error",
+          },
+        );
+      }
+    },
+    [onRemoveHistorySession],
   );
 
   const onPinHistorySession = useCallback(
@@ -2542,83 +2752,8 @@ export default function App({
   );
 
   const onDeleteHistorySession = useCallback(
-    async (sessionId: string) => {
-      const open = sessionsRef.current.find(
-        (session) => session.id === sessionId,
-      );
-      const summary =
-        history.find((entry) => entry.id === sessionId) ?? open ?? null;
-      const label = summary
-        ? sessionDisplayTitle(summary.title, summary.harness)
-        : "this session";
-
-      if (!window.confirm(`Delete “${label}”?`)) return;
-
-      if (open?.busy) {
-        turnGen.current.set(
-          sessionId,
-          (turnGen.current.get(sessionId) ?? 0) + 1,
-        );
-        for (const id of sessionChildHarnesses(open)) {
-          void cancelHarnessTurn(id, sessionId);
-        }
-      }
-
-      const harness = open?.harness ?? summary?.harness ?? "cursor";
-      if (open) {
-        for (const id of sessionChildHarnesses(open)) {
-          void forgetHarnessSession(id, sessionId);
-        }
-      } else {
-        void forgetHarnessSession(harness, sessionId);
-      }
-      lastPersisted.current.delete(sessionId);
-      await deleteSession(sessionId).catch(() => undefined);
-
-      if (
-        !tabsRef.current.some((tab) => leafIds(tab.layout).includes(sessionId))
-      ) {
-        setSessions((prev) =>
-          prev.filter((session) => session.id !== sessionId),
-        );
-        void refreshHistory(sidebarCwd);
-        return;
-      }
-
-      const {
-        tabs: nextTabs,
-        sessions: nextSessions,
-        activeTabId: nextActiveTabId,
-      } = applyDeletedSessionToWorkspace({
-        tabs: tabsRef.current,
-        sessions: sessionsRef.current,
-        sessionId,
-        activeTabId: activeTabIdRef.current,
-        scope: tabCloseScope,
-        createReplacement: (seed) =>
-          newSession(
-            seed?.harness ?? harness,
-            seed?.cwd ?? summary?.cwd ?? sidebarCwd,
-            seed?.model ?? summary?.model,
-            seed?.runtimeMode ?? summary?.runtimeMode,
-            seed?.modelSettings,
-          ),
-      });
-
-      setSessions(nextSessions);
-      setTabs(nextTabs);
-      if (nextActiveTabId !== activeTabIdRef.current) {
-        activateTab(nextActiveTabId);
-      }
-      setComposerFocused(
-        nextSessions.some((session) => {
-          const tab = nextTabs.find((entry) => entry.id === nextActiveTabId);
-          return !!tab && session.id === tab.focusedId;
-        }),
-      );
-      void refreshHistory(sidebarCwd);
-    },
-    [activateTab, history, refreshHistory, sidebarCwd, tabCloseScope],
+    (sessionId: string) => onRemoveHistorySession(sessionId, "delete"),
+    [onRemoveHistorySession],
   );
 
   const onFocusDir = useCallback(
@@ -3133,6 +3268,7 @@ export default function App({
         buildTarget?: PlanBuildTarget;
       },
     ) => {
+      if (removingSessionIds.current.has(sessionId)) return;
       const storedCurrent = sessionsRef.current.find((s) => s.id === sessionId);
       if (!storedCurrent) return;
       const current = options?.buildTarget
@@ -3170,7 +3306,10 @@ export default function App({
       if (isPreparingHandoff(current)) return;
       const workCwd = sessionWorkCwd(current);
       const submittedText = intent === "build" ? "Build approved plan" : text;
-      const harnessText = composeNoteMessage(noteCard, submittedText);
+      const rawCommand = isNativeCommandPrompt(submittedText, current.harness);
+      const harnessText = rawCommand
+        ? submittedText
+        : composeNoteMessage(noteCard, submittedText);
 
       const pendingSwitch =
         current.pendingSwitch && current.pendingSwitch.from !== current.harness
@@ -3188,9 +3327,9 @@ export default function App({
               s.id === sessionId
                 ? {
                     ...s,
-                    inboxCard: undefined,
-                    noteCard: undefined,
-                    handoffCard: undefined,
+                    inboxCard: rawCommand ? s.inboxCard : undefined,
+                    noteCard: rawCommand ? s.noteCard : undefined,
+                    handoffCard: rawCommand ? s.handoffCard : undefined,
                     queuedMessages: [
                       ...(s.queuedMessages ?? []),
                       {
@@ -3230,9 +3369,9 @@ export default function App({
             if (s.id !== sessionId) return s;
             let next: Session = {
               ...s,
-              inboxCard: undefined,
-              noteCard: undefined,
-              handoffCard: undefined,
+              inboxCard: rawCommand ? s.inboxCard : undefined,
+              noteCard: rawCommand ? s.noteCard : undefined,
+              handoffCard: rawCommand ? s.handoffCard : undefined,
             };
             if (options?.queuedMessageId) {
               next = dequeueQueuedMessage(next, options.queuedMessageId);
@@ -3245,6 +3384,7 @@ export default function App({
             const prepared = await prepareAttachments(attachments);
             const prompt = await preparePrompt(harnessText, {
               harness: current.harness,
+              sessionId,
               cwd: workCwd,
             });
             await steerHarnessTurn({
@@ -3296,7 +3436,7 @@ export default function App({
           : card
             ? SECOND_OPINION_TITLE
             : submittedText;
-      const cards = userTurnCards(noteCard, card);
+      const cards = rawCommand ? undefined : userTurnCards(noteCard, card);
       const live = isLiveHarness(current.harness);
       const queuedHandoff =
         live && !pendingSwitch ? pendingHandoff(current) : null;
@@ -3314,9 +3454,9 @@ export default function App({
           const titled = isFirstTurn ? titleSeed : selected.title;
           let next: Session = {
             ...selected,
-            inboxCard: undefined,
-            noteCard: undefined,
-            handoffCard: undefined,
+            inboxCard: rawCommand ? s.inboxCard : undefined,
+            noteCard: rawCommand ? s.noteCard : undefined,
+            handoffCard: rawCommand ? s.handoffCard : undefined,
           };
           if (approvedPlan && intent === "build") {
             next = {
@@ -3485,10 +3625,11 @@ export default function App({
               ? buildPlanPrompt(approvedPlan.text)
               : await preparePrompt(harnessText, {
                   harness: current.harness,
+                  sessionId,
                   cwd: workCwd,
                 });
           const turnPrompt =
-            intent === "plan" ? planTurnPrompt(prompt) : prompt;
+            intent === "plan" && !rawCommand ? planTurnPrompt(prompt) : prompt;
           const earlier = queuedHandoff
             ? userMessagesAfterHandoff(current)
             : [];
@@ -3500,7 +3641,7 @@ export default function App({
             modelSettings: current.modelSettings,
             runtimeMode: current.runtimeMode,
             intent,
-            text: wrap
+            text: wrap && !rawCommand
               ? wrapHandoffPrompt(
                   wrap.text,
                   wrap.from,
@@ -3532,7 +3673,8 @@ export default function App({
                 const ready = isPreparingHandoff(s)
                   ? completeHandoff(s, wrap.text)
                   : s;
-                return consumeHandoff(ready);
+                // A command owns its arguments; deliver the recap with the next chat prompt.
+                return rawCommand ? ready : consumeHandoff(ready);
               }),
             );
           }
@@ -4332,6 +4474,45 @@ export default function App({
     );
   }, []);
 
+  const onSessionNavigationOrder = useCallback((ids: readonly string[]) => {
+    sessionNavigationIdsRef.current = ids;
+  }, []);
+
+  const onNavigateSessionList = useCallback(
+    (delta: number) => {
+      const activeWorkspace = tabsRef.current.find(
+        (entry) => entry.id === activeTabIdRef.current,
+      );
+      if (!activeWorkspace || activeWorkspace.diffFocused) return;
+      const current = sessionsRef.current.find(
+        (session) => session.id === activeWorkspace.focusedId,
+      );
+      if (!current) return;
+
+      const next = adjacentItemId(
+        sessionNavigationIdsRef.current,
+        current.id,
+        delta,
+      );
+      if (!next || next === current.id) return;
+      void onSelectHistorySession(next);
+    },
+    [onSelectHistorySession],
+  );
+
+  const onNavigateProjectList = useCallback(
+    (delta: number) => {
+      const current = normalizeProjectPath(projectCwdRef.current);
+      const ids = projectRailItems(loadRecents(), current).map(
+        (project) => project.path,
+      );
+      const next = adjacentItemId(ids, current, delta);
+      if (!next || sameProjectPath(next, current)) return;
+      onSelectProject(next);
+    },
+    [onSelectProject],
+  );
+
   const actions = useRef({
     onNew,
     onCloseOtherTabs,
@@ -4353,6 +4534,8 @@ export default function App({
     onNewTerminal,
     onNewTerminalTab,
     onToggleProjectTerminal,
+    onNavigateSessionList,
+    onNavigateProjectList,
     openSettings,
   });
   actions.current = {
@@ -4376,6 +4559,8 @@ export default function App({
     onNewTerminal,
     onNewTerminalTab,
     onToggleProjectTerminal,
+    onNavigateSessionList,
+    onNavigateProjectList,
     openSettings,
   };
 
@@ -4393,6 +4578,37 @@ export default function App({
       const cmd = tabCommand(e);
       if (cmd) {
         const target = e.target instanceof Element ? e.target : null;
+        const listNavigation =
+          cmd === "prev-session" ||
+          cmd === "next-session" ||
+          cmd === "prev-project" ||
+          cmd === "next-project";
+        if (listNavigation) {
+          const blockedTarget = Boolean(
+            target?.closest(
+              'input, textarea, select, [contenteditable="true"], .cm-editor, .monocode-terminal, [role="dialog"], [data-model-picker], [data-file-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker], [data-app-search]',
+            ),
+          );
+          const emptyComposerTarget = Boolean(
+            target?.matches('textarea[data-composer-empty="true"]'),
+          );
+          const surfaceOpen =
+            searchViewOpenRef.current ||
+            inboxViewOpenRef.current ||
+            notesViewOpenRef.current ||
+            settingsOpenRef.current ||
+            filePickerOpenRef.current ||
+            Boolean(whatsNewVersionRef.current);
+          if (
+            !shouldHandleListNavigation({
+              blockedTarget,
+              emptyComposerTarget,
+              surfaceOpen,
+            })
+          ) {
+            return;
+          }
+        }
         if (
           target?.closest(".monocode-terminal") &&
           e.ctrlKey &&
@@ -4437,6 +4653,14 @@ export default function App({
           run("new-terminal-tab", a.onNewTerminalTab);
         else if (cmd === "toggle-terminal")
           run("toggle-terminal", a.onToggleProjectTerminal);
+        else if (cmd === "prev-session")
+          run("prev-session", () => a.onNavigateSessionList(-1));
+        else if (cmd === "next-session")
+          run("next-session", () => a.onNavigateSessionList(1));
+        else if (cmd === "prev-project")
+          run("prev-project", () => a.onNavigateProjectList(-1));
+        else if (cmd === "next-project")
+          run("next-project", () => a.onNavigateProjectList(1));
         else if ("focus" in cmd)
           run(`focus-${cmd.focus}`, () => a.onFocusDir(cmd.focus));
         else run(`activate-${cmd.activate}`, () => a.onActivate(cmd.activate));
@@ -4613,6 +4837,7 @@ export default function App({
         status={historyFailed ? "error" : "idle"}
         pending={historyPending}
         onSelectSession={onSelectHistorySession}
+        onSessionNavigationOrder={onSessionNavigationOrder}
         onPlaceSessionOnPane={onPlaceSessionOnPane}
         onRenameSession={onRenameHistorySession}
         onArchiveSession={onArchiveHistorySession}
@@ -4726,7 +4951,7 @@ export default function App({
             onOpenSettings={onOpenSettings}
             onOpenInbox={onOpenInbox}
             onOpenNotes={notesEnabled ? onOpenNotes : undefined}
-            onClose={onCloseTab}
+            onClose={onCloseTitleTab}
             onReorder={onReorderTabs}
             onGoToFile={onGoToFile}
             recents={recents}
@@ -5099,6 +5324,7 @@ function toTitleTab(
     files,
     multiPane,
     fileFocused,
+    blank: isBlankWorkspaceTab(tab, sessions),
     dirty: tab.editorPanes.some((pane) =>
       pane.files.some(
         (file) => isFilesystemTab(file) && dirtyFiles.has(file.id),

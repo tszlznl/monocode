@@ -17,6 +17,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,7 +25,6 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
-  type UIEvent,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
@@ -76,6 +76,8 @@ import type {
 import {
   createBlankSkill,
   rankSkills,
+  hasNativeCommands,
+  isNativeCommandPrompt,
   replaceSlashToken,
   skillTextParts,
   slashTokenAt,
@@ -131,6 +133,7 @@ type Props = {
   runtimeMode: RuntimeMode;
   cwd?: string;
   executionCwd: string;
+  sessionId?: string;
   branch?: string;
   recents?: RecentProject[];
   hideProjectPicker?: boolean;
@@ -171,6 +174,7 @@ type Props = {
   onSteerQueuedMessage?: (messageId: string) => void;
   onResumeQueue?: () => void;
   onOpenFile?: (path: string) => void;
+  onDraftChange?: (text: string) => void;
   children?: ReactNode;
 };
 
@@ -384,6 +388,7 @@ export function Composer({
   runtimeMode,
   cwd = "~",
   executionCwd,
+  sessionId,
   branch,
   recents = [],
   hideProjectPicker = false,
@@ -419,6 +424,7 @@ export function Composer({
   onSteerQueuedMessage,
   onResumeQueue,
   onOpenFile,
+  onDraftChange,
   children,
 }: Props) {
   const { t } = useI18n();
@@ -472,10 +478,17 @@ export function Composer({
 
   const mentionOpen =
     mention !== null && (looksLikeProject(cwd) || notesEnabled);
+  const navigationEmpty =
+    draft.length === 0 &&
+    attachments.length === 0 &&
+    !inboxCard &&
+    !noteCard &&
+    !handoffCard;
   const pickerOpen = creatingSkill || slash !== null;
   const skillCatalog = useComposerSkills({
     harness,
     executionCwd,
+    sessionId,
     pickerOpen,
   });
   const skills = skillCatalog.skills;
@@ -485,13 +498,14 @@ export function Composer({
       COMPACT_COMMAND,
       ...skills.filter(
         (skill) =>
-          skill.name !== PLAN_COMMAND.name &&
-          skill.name !== COMPACT_COMMAND.name,
+          skill.kind === "native" ||
+          (skill.name !== PLAN_COMMAND.name &&
+            skill.name !== COMPACT_COMMAND.name),
       ),
     ],
     [skills],
   );
-  const skillLimit = harness === "pi" ? Number.POSITIVE_INFINITY : undefined;
+  const skillLimit = hasNativeCommands(harness) ? Number.POSITIVE_INFINITY : undefined;
   const rankedSkills = rankSkills(slashItems, slash?.query ?? "", skillLimit);
   const attachmentsSupported = harnessSupportsAttachments(harness);
   const skillNames = useMemo(
@@ -654,21 +668,39 @@ export function Composer({
   useEffect(() => {
     const el = ref.current;
     if (!el || !initialDraft) return;
-    el.value = initialDraft;
+    if (el.value !== initialDraft) el.value = initialDraft;
     resizeTextarea(el);
   }, [initialDraft]);
 
-  const syncHighlightScroll = (e: UIEvent<HTMLTextAreaElement>) => {
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
+
+  const syncHighlightScroll = useCallback((el: HTMLTextAreaElement) => {
     const highlight = highlightRef.current;
     if (!highlight) return;
-    highlight.scrollTop = e.currentTarget.scrollTop;
-    highlight.scrollLeft = e.currentTarget.scrollLeft;
-  };
+    highlight.scrollTop = el.scrollTop;
+    highlight.scrollLeft = el.scrollLeft;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    // The textarea can scroll itself to keep the caret visible before React
+    // commits the updated highlight text. Sync again after that commit, when
+    // the overlay has enough scrollable content to accept the same offset.
+    syncHighlightScroll(el);
+    const frame = requestAnimationFrame(() => {
+      if (ref.current === el) syncHighlightScroll(el);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [draft, syncHighlightScroll]);
 
   const syncTokensFromTextarea = (el: HTMLTextAreaElement) => {
     if (creatingSkill) return;
     const cursor = el.selectionStart ?? 0;
-    const token = slashTokenAt(el.value, cursor);
+    const token = slashTokenAt(el.value, cursor, hasNativeCommands(harness));
     setSlash(token);
     setMention(token ? null : mentionTokenAt(el.value, cursor));
   };
@@ -707,7 +739,7 @@ export function Composer({
         setCreatingSkill(false);
         return;
       }
-      const planCommand = skill.name === PLAN_COMMAND.name;
+      const planCommand = skill.kind === "builtin" && skill.name === PLAN_COMMAND.name;
       const next = planCommand
         ? `${el.value.slice(0, token.start)}${el.value
             .slice(token.end)
@@ -872,6 +904,7 @@ export function Composer({
       ref.current.value = "";
       ref.current.style.height = "auto";
       setDraft("");
+      onDraftChange?.("");
       setPlusOpen(false);
       setSlash(null);
       setMention(null);
@@ -882,7 +915,9 @@ export function Composer({
     }
 
     const command = consumePlanCommand(value);
-    const text = composeInboxMessage(inboxCard, command.text);
+    const text = isNativeCommandPrompt(command.text, harness)
+      ? command.text
+      : composeInboxMessage(inboxCard, command.text);
     const files = attachments;
     if (!text && files.length === 0 && !noteCard && !handoffCard) return;
     onSubmit(text, files, {
@@ -892,6 +927,7 @@ export function Composer({
     ref.current.value = "";
     ref.current.style.height = "auto";
     setDraft("");
+    onDraftChange?.("");
     setAttachments([]);
     setPlanSelected(false);
     setPlusOpen(false);
@@ -1191,6 +1227,7 @@ export function Composer({
             </div>
             <textarea
               ref={ref}
+              data-composer-empty={navigationEmpty ? "true" : undefined}
               rows={1}
               spellCheck={false}
               defaultValue={initialDraft}
@@ -1211,7 +1248,7 @@ export function Composer({
               onFocus={onFocus}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
-              onScroll={syncHighlightScroll}
+              onScroll={(e) => syncHighlightScroll(e.currentTarget)}
               onClick={(e) => syncTokensFromTextarea(e.currentTarget)}
               onKeyUp={(e) => syncTokensFromTextarea(e.currentTarget)}
               onSelect={(e) => syncTokensFromTextarea(e.currentTarget)}
