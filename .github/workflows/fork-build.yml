@@ -87,6 +87,13 @@ jobs:
           name: MonoCode-linux-x64
           path: release/
 
+      - name: Flatten release files
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find release -type f -exec cp {} dist/ \;
+          ls -la dist/
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,4 +104,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "MonoCode $VERSION" \
             --notes "Automated fork build of $GITHUB_SHA." \
-            release/*
+            dist/*
