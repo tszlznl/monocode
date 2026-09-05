@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-#[cfg(unix)]
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
-#[cfg(unix)]
 use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
@@ -18,7 +15,6 @@ use crate::fs::expand_home;
 
 const DATA_EVENT: &str = "pty-data";
 const EXIT_EVENT: &str = "pty-exit";
-#[cfg(unix)]
 const READ_CHUNK: usize = 32 * 1024;
 /// Cap how often a busy PTY hops the webview. Each `emit` is a JS eval; a
 /// flood of small reads was thousands per second and froze input.
@@ -45,7 +41,52 @@ struct LivePty {
     writer: Mutex<Box<dyn Write + Send>>,
     #[cfg(unix)]
     master_fd: i32,
+    #[cfg(windows)]
+    h_pc: windows_sys::Win32::System::Console::HPCON,
+    #[cfg(windows)]
+    process_handle: windows_sys::Win32::Foundation::HANDLE,
     pid: u32,
+}
+
+#[cfg(windows)]
+unsafe impl Send for LivePty {}
+#[cfg(windows)]
+unsafe impl Sync for LivePty {}
+
+#[cfg(windows)]
+impl LivePty {
+    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+        use windows_sys::Win32::System::Console::{ResizePseudoConsole, COORD};
+        let size = COORD {
+            X: cols as i16,
+            Y: rows as i16,
+        };
+        let res = unsafe { ResizePseudoConsole(self.h_pc, size) };
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(format!("ResizePseudoConsole failed: HRESULT 0x{res:x}"))
+        }
+    }
+
+    fn cleanup(&self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Console::ClosePseudoConsole;
+        // The reader thread must still be draining the out pipe here:
+        // ClosePseudoConsole writes a final DSR sequence into it and blocks
+        // until that write is consumed. Never drop the reader (or close its
+        // handle) before calling this.
+        if self.h_pc != 0 {
+            unsafe {
+                ClosePseudoConsole(self.h_pc);
+            }
+        }
+        if !self.process_handle.is_null() {
+            unsafe {
+                CloseHandle(self.process_handle);
+            }
+        }
+    }
 }
 
 pub struct PtyHost {
@@ -97,9 +138,14 @@ impl PtyHost {
         let pids: Vec<u32> = kids.iter().map(|live| live.pid).collect();
         for live in kids {
             #[cfg(unix)]
-            hangup(live.pid);
-            #[cfg(unix)]
-            close_fd(live.master_fd);
+            {
+                hangup(live.pid);
+                close_fd(live.master_fd);
+            }
+            #[cfg(windows)]
+            {
+                live.cleanup();
+            }
         }
         // Quit and `Drop` both exit the process, so the SIGKILL has to land
         // before this returns. `terminate`'s detached escalate thread never gets
@@ -127,17 +173,24 @@ pub fn pty_spawn(
         terminate(prev.pid);
         #[cfg(unix)]
         close_fd(prev.master_fd);
+        #[cfg(windows)]
+        prev.cleanup();
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = (app, cwd, cols, rows);
-        return Err("Terminals are supported on macOS and Linux.".into());
+        spawn_windows(app, host, id, cwd, cols.max(2), rows.max(2))
     }
 
     #[cfg(unix)]
     {
         spawn_unix(app, host, id, cwd, cols.max(2), rows.max(2))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (app, cwd, cols, rows);
+        Err("Terminals are supported on Windows, macOS, and Linux.".into())
     }
 }
 
@@ -162,10 +215,14 @@ pub fn pty_resize(host: State<PtyHost>, id: String, cols: u16, rows: u16) -> Res
     {
         resize_fd(live.master_fd, cols.max(2), rows.max(2))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        live.resize(cols.max(2), rows.max(2))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (live, cols, rows);
-        Err("Terminals are supported on macOS and Linux.".into())
+        Err("Terminals are supported on Windows, macOS, and Linux.".into())
     }
 }
 
@@ -200,6 +257,8 @@ pub fn pty_kill(host: State<PtyHost>, id: String) -> Result<(), String> {
         terminate(live.pid);
         #[cfg(unix)]
         close_fd(live.master_fd);
+        #[cfg(windows)]
+        live.cleanup();
     }
     Ok(())
 }
@@ -341,7 +400,6 @@ fn spawn_unix(
     Ok(())
 }
 
-#[cfg(unix)]
 fn working_dir(cwd: &str) -> std::path::PathBuf {
     let path = expand_home(cwd);
     if path.is_dir() {
@@ -435,7 +493,11 @@ fn terminate(pid: u32) {
             }
         });
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        crate::harness::terminate(pid);
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
     }
@@ -545,7 +607,6 @@ fn os_err(ctx: &str) -> String {
     format!("{ctx}: {}", std::io::Error::last_os_error())
 }
 
-#[cfg(unix)]
 fn emit_pty_data(app: &AppHandle, id: &str, bytes: &[u8]) {
     if bytes.is_empty() {
         return;
@@ -656,6 +717,362 @@ fn is_shell_name(name: &str) -> bool {
     )
 }
 
+#[cfg(windows)]
+struct PipeWriter {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+unsafe impl Send for PipeWriter {}
+
+#[cfg(windows)]
+impl Write for PipeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use windows_sys::Win32::Storage::FileSystem::WriteFile;
+        let mut written: u32 = 0;
+        let ok = unsafe {
+            WriteFile(
+                self.handle,
+                buf.as_ptr(),
+                buf.len() as u32,
+                &mut written,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok != 0 {
+            Ok(written as usize)
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        use windows_sys::Win32::Storage::FileSystem::FlushFileBuffers;
+        unsafe {
+            FlushFileBuffers(self.handle);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for PipeWriter {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        if !self.handle.is_null() {
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+struct PipeReader {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+unsafe impl Send for PipeReader {}
+
+#[cfg(windows)]
+impl Read for PipeReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use windows_sys::Win32::Storage::FileSystem::ReadFile;
+        let mut bytes_read: u32 = 0;
+        let ok = unsafe {
+            ReadFile(
+                self.handle,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut bytes_read,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok != 0 {
+            Ok(bytes_read as usize)
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(109) {
+                // ERROR_BROKEN_PIPE
+                Ok(0)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for PipeReader {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        if !self.handle.is_null() {
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn pipe_has_data(handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+    let mut available: u32 = 0;
+    let ok = unsafe {
+        PeekNamedPipe(
+            handle,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        )
+    };
+    ok != 0 && available > 0
+}
+
+#[cfg(windows)]
+fn default_windows_shell() -> String {
+    if let Some(pwsh) = crate::harness::resolve_gui_binary("pwsh") {
+        return pwsh.to_string_lossy().into_owned();
+    }
+    "powershell.exe".into()
+}
+
+#[cfg(windows)]
+fn to_wide_null(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn spawn_windows(
+    app: AppHandle,
+    host: State<PtyHost>,
+    id: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Console::{CreatePseudoConsole, COORD, HPCON};
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
+        UpdateProcThreadAttribute, EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION,
+        STARTUPINFOEXW,
+    };
+
+    let mut h_in_read = std::ptr::null_mut();
+    let mut h_in_write = std::ptr::null_mut();
+    let mut h_out_read = std::ptr::null_mut();
+    let mut h_out_write = std::ptr::null_mut();
+
+    let ok1 = unsafe { CreatePipe(&mut h_in_read, &mut h_in_write, std::ptr::null(), 0) };
+    let ok2 = unsafe { CreatePipe(&mut h_out_read, &mut h_out_write, std::ptr::null(), 0) };
+    if ok1 == 0 || ok2 == 0 {
+        unsafe {
+            if !h_in_read.is_null() { CloseHandle(h_in_read); }
+            if !h_in_write.is_null() { CloseHandle(h_in_write); }
+            if !h_out_read.is_null() { CloseHandle(h_out_read); }
+            if !h_out_write.is_null() { CloseHandle(h_out_write); }
+        }
+        return Err("Failed to create pipes for ConPTY".into());
+    }
+
+    let coord = COORD {
+        X: cols as i16,
+        Y: rows as i16,
+    };
+    let mut h_pc: HPCON = 0;
+    let hr = unsafe { CreatePseudoConsole(coord, h_in_read, h_out_write, 0, &mut h_pc) };
+    if hr != 0 {
+        unsafe {
+            CloseHandle(h_in_read);
+            CloseHandle(h_in_write);
+            CloseHandle(h_out_read);
+            CloseHandle(h_out_write);
+        }
+        return Err(format!("CreatePseudoConsole failed: HRESULT 0x{hr:x}"));
+    }
+
+    // PseudoConsole owns its references to h_in_read and h_out_write
+    unsafe {
+        CloseHandle(h_in_read);
+        CloseHandle(h_out_write);
+    }
+
+    let mut attr_size: usize = 0;
+    unsafe {
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attr_size);
+    }
+    let mut attr_list_buffer: Vec<u8> = vec![0u8; attr_size];
+    let lp_attribute_list = attr_list_buffer.as_mut_ptr() as *mut std::ffi::c_void;
+    let ok_attr = unsafe {
+        InitializeProcThreadAttributeList(lp_attribute_list, 1, 0, &mut attr_size)
+    };
+    if ok_attr == 0 {
+        unsafe {
+            windows_sys::Win32::System::Console::ClosePseudoConsole(h_pc);
+            CloseHandle(h_in_write);
+            CloseHandle(h_out_read);
+        }
+        return Err("Failed to initialize thread attribute list".into());
+    }
+
+    const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x00020016;
+    let ok_update = unsafe {
+        UpdateProcThreadAttribute(
+            lp_attribute_list,
+            0,
+            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+            h_pc as *const std::ffi::c_void,
+            std::mem::size_of::<HPCON>(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok_update == 0 {
+        unsafe {
+            DeleteProcThreadAttributeList(lp_attribute_list);
+            windows_sys::Win32::System::Console::ClosePseudoConsole(h_pc);
+            CloseHandle(h_in_write);
+            CloseHandle(h_out_read);
+        }
+        return Err("Failed to update thread attribute list for PseudoConsole".into());
+    }
+
+    let mut startup_info_ex: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
+    startup_info_ex.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    startup_info_ex.lpAttributeList = lp_attribute_list;
+
+    let mut proc_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let shell = default_windows_shell();
+    let mut cmdline = to_wide_null(&format!("{shell} -NoLogo"));
+    let cwd_buf = working_dir(&cwd);
+    let wide_cwd = to_wide_null(&cwd_buf.to_string_lossy());
+
+    let ok_proc = unsafe {
+        CreateProcessW(
+            std::ptr::null(),
+            cmdline.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            EXTENDED_STARTUPINFO_PRESENT,
+            std::ptr::null(),
+            wide_cwd.as_ptr(),
+            &startup_info_ex.StartupInfo,
+            &mut proc_info,
+        )
+    };
+
+    unsafe {
+        DeleteProcThreadAttributeList(lp_attribute_list);
+    }
+
+    if ok_proc == 0 {
+        let err = std::io::Error::last_os_error();
+        unsafe {
+            windows_sys::Win32::System::Console::ClosePseudoConsole(h_pc);
+            CloseHandle(h_in_write);
+            CloseHandle(h_out_read);
+        }
+        return Err(format!("CreateProcessW failed for {shell}: {err}"));
+    }
+
+    unsafe {
+        CloseHandle(proc_info.hThread);
+    }
+
+    let pid = proc_info.dwProcessId;
+    let proc_handle = proc_info.hProcess;
+
+    let writer = PipeWriter { handle: h_in_write };
+    let reader = PipeReader { handle: h_out_read };
+
+    let live = Arc::new(LivePty {
+        writer: Mutex::new(Box::new(writer)),
+        #[cfg(unix)]
+        master_fd: -1,
+        #[cfg(windows)]
+        h_pc,
+        #[cfg(windows)]
+        process_handle: proc_handle,
+        pid,
+    });
+    host.insert(id.clone(), live);
+
+    let data_app = app.clone();
+    let data_id = id.clone();
+    thread::spawn(move || {
+        let mut file = reader;
+        let mut buf = vec![0_u8; READ_CHUNK];
+        let mut acc: Vec<u8> = Vec::with_capacity(READ_CHUNK);
+        // Coalesce like the unix loop: while ConPTY has output buffered, keep
+        // accumulating and only emit when the stream pauses or the buffer is
+        // full — a per-read emit floods the webview with thousands of JS
+        // evals a second.
+        loop {
+            if pipe_has_data(file.handle) {
+                match file.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => acc.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+                if acc.len() >= READ_CHUNK {
+                    emit_pty_data(&data_app, &data_id, &acc);
+                    acc.clear();
+                }
+                continue;
+            }
+            if !acc.is_empty() {
+                emit_pty_data(&data_app, &data_id, &acc);
+                acc.clear();
+            }
+            match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => acc.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        if !acc.is_empty() {
+            emit_pty_data(&data_app, &data_id, &acc);
+        }
+    });
+
+    let wait_app = app;
+    let wait_id = id;
+    let proc_raw = proc_handle as isize;
+    thread::spawn(move || {
+        let proc_handle = proc_raw as windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+        const INFINITE: u32 = 0xFFFFFFFF;
+        unsafe {
+            WaitForSingleObject(proc_handle, INFINITE);
+        }
+        let mut code: u32 = 0;
+        let got_code = unsafe { GetExitCodeProcess(proc_handle, &mut code) };
+        let exit_code = if got_code != 0 { Some(code as i32) } else { None };
+
+        let emit = if let Some(host) = wait_app.try_state::<PtyHost>() {
+            if let Some(live) = host.remove_if_pid(&wait_id, pid) {
+                live.cleanup();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if emit {
+            let _ = wait_app.emit(EXIT_EVENT, PtyExit { id: wait_id, code: exit_code });
+        }
+    });
+
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod label_tests {
     use super::*;
@@ -677,7 +1094,7 @@ mod label_tests {
 }
 
 #[cfg(all(test, unix))]
-mod tests {
+mod unix_tests {
     use super::*;
 
     #[test]
@@ -694,6 +1111,11 @@ mod tests {
         assert!(pty_should_flush(READ_CHUNK, Duration::from_millis(1)));
         assert!(pty_should_flush(1, PTY_COALESCE));
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn remove_if_pid_ignores_a_replaced_session() {
@@ -702,7 +1124,12 @@ mod tests {
             "term".into(),
             Arc::new(LivePty {
                 writer: Mutex::new(Box::new(std::io::sink())),
+                #[cfg(unix)]
                 master_fd: -1,
+                #[cfg(windows)]
+                h_pc: 0,
+                #[cfg(windows)]
+                process_handle: std::ptr::null_mut(),
                 pid: 42,
             }),
         );

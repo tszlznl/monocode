@@ -70,6 +70,11 @@ fn search_project_sync(options: &SearchOptions) -> Result<SearchResult, String> 
 
 fn git_grep(root: &Path, options: &SearchOptions, query: &str) -> Option<SearchResult> {
     let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
     cmd.arg("-C").arg(root).arg("grep").arg("-z").arg("-n");
     if !options.case_sensitive {
         cmd.arg("-i");

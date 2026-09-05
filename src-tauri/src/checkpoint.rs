@@ -775,7 +775,13 @@ fn calculate_session_stats(dir: &Path, manifest: &Manifest, relative: &str) -> O
 }
 
 fn diff_numstat(before: &Path, after: &Path) -> Option<(i64, i64)> {
-    let output = Command::new("git")
+    let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let output = cmd
         .args(["diff", "--no-index", "--no-ext-diff", "--numstat", "--"])
         .arg(before)
         .arg(after)
@@ -1109,6 +1115,7 @@ mod tests {
         }
         let _ = git(dir, &["config", "user.email", "monocode@test"]);
         let _ = git(dir, &["config", "user.name", "monocode"]);
+        let _ = git(dir, &["config", "core.autocrlf", "false"]);
         for (name, contents) in files {
             let path = dir.join(name);
             if let Some(parent) = path.parent() {

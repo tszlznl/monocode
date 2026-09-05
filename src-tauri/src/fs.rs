@@ -95,8 +95,18 @@ pub(crate) fn list_project_files_sync(cwd: &str) -> Result<Vec<ProjectFile>, Str
     Ok(walk_project_files(&root))
 }
 
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
 fn git_ls_files(root: &Path) -> Option<Vec<ProjectFile>> {
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(root)
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
@@ -1396,7 +1406,7 @@ fn git_index_mode(root: &Path, relative: &str) -> Option<String> {
 }
 
 fn git_hash_object(root: &Path, relative: &str, contents: &[u8]) -> Result<String, String> {
-    let mut child = Command::new("git")
+    let mut child = git_cmd()
         .arg("--no-pager")
         .arg("-C")
         .arg(root)
@@ -2488,6 +2498,11 @@ fn gh_run(root: &Path, args: &[&str], allow_empty: bool) -> Result<String, Strin
     let program = crate::harness::resolve_gui_binary("gh")
         .ok_or_else(|| "GitHub CLI (`gh`) is not installed.".to_string())?;
     let mut cmd = Command::new(&program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
     cmd.current_dir(root)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -2541,7 +2556,7 @@ pub(crate) fn resolve_repo_path(root: &Path, relative: &str) -> Result<String, S
 }
 
 pub(crate) fn git_checked(root: &Path, args: &[&str]) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("--no-pager")
         .arg("-C")
         .arg(root)
@@ -2575,7 +2590,7 @@ fn git_run(root: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("--no-pager")
         .arg("-C")
         .arg(root)
@@ -2780,7 +2795,7 @@ fn git_branch_name(root: &Path, name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("Branch name cannot be empty".into());
     }
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(root)
         .args(["check-ref-format", "--branch", name])
@@ -2906,7 +2921,7 @@ fn git_ahead_behind(root: &Path, base: &str) -> (i64, i64) {
 }
 
 fn git_stdout(root: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -3147,7 +3162,7 @@ pub(crate) fn expand_home(path: &str) -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(path));
     }
-    if let Some(rest) = path.strip_prefix("~/") {
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         if let Some(home) = dirs_home() {
             return PathBuf::from(home).join(rest);
         }
@@ -3224,7 +3239,7 @@ fn clone_repo_sync(url: &str, parent: &str) -> Result<String, String> {
         return Err(format!("{} already exists", dest.display()));
     }
     let dest_str = dest.to_str().ok_or("Invalid destination path")?;
-    let output = std::process::Command::new("git")
+    let output = git_cmd()
         .args(["clone", "--", url, dest_str])
         .output()
         .map_err(|e| {
@@ -4123,6 +4138,7 @@ mod tests {
         git(dir, &["config", "user.name", "MonoCode"])
             && git(dir, &["config", "user.email", "monocode@test"])
             && git(dir, &["config", "commit.gpgsign", "false"])
+            && git(dir, &["config", "core.autocrlf", "false"])
     }
 
     #[test]
@@ -4774,7 +4790,7 @@ mod tests {
             || !git(&a.0, &["push", "-u", "origin", "main"])
             || !git(&origin.0, &["symbolic-ref", "HEAD", "refs/heads/main"])
             || Command::new("git")
-                .args(["clone", "-b", "main", &origin_url, "."])
+                .args(["clone", "-c", "core.autocrlf=false", "-b", "main", &origin_url, "."])
                 .current_dir(&b.0)
                 .status()
                 .map(|status| !status.success())
@@ -4782,6 +4798,7 @@ mod tests {
             || !git(&b.0, &["config", "user.name", "MonoCode"])
             || !git(&b.0, &["config", "user.email", "monocode@test"])
             || !git(&b.0, &["config", "commit.gpgsign", "false"])
+            || !git(&b.0, &["config", "core.autocrlf", "false"])
         {
             return;
         }

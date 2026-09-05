@@ -115,7 +115,9 @@ impl HarnessHost {
         (epoch, kill_all, prev)
     }
 
-    #[cfg(test)]
+    /// Test-only view of the spawn stamp; the unix tests assert on it and
+    /// nothing else does, so it is gated to exactly that build.
+    #[cfg(all(test, unix))]
     fn spawn_stamp_current(&self, session_id: &str, epoch: u64, kill_all: u64) -> bool {
         let inner = self.lock_inner();
         self.kill_all_gen.load(Ordering::SeqCst) == kill_all
@@ -313,6 +315,94 @@ pub fn harness_free_port() -> Result<u16, String> {
         .map_err(|e| format!("Failed to reserve a local port: {e}"))
 }
 
+#[cfg(windows)]
+fn crt_quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.bytes().any(|b| b == b' ' || b == b'\t' || b == b'"') {
+        return arg.to_string();
+    }
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for ch in arg.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+            out.push('\\');
+        } else if ch == '"' {
+            for _ in 0..=backslashes {
+                out.push('\\');
+            }
+            backslashes = 0;
+            out.push('"');
+        } else {
+            backslashes = 0;
+            out.push(ch);
+        }
+    }
+    for _ in 0..backslashes {
+        out.push('\\');
+    }
+    out.push('"');
+    out
+}
+
+/// Run a `.cmd`/`.bat` through `cmd.exe`. Rust's own batch handling refuses
+/// args cmd.exe could mis-parse, so build the command line by hand: every
+/// token is CRT-quoted, and `/S /C "line"` makes cmd strip exactly the outer
+/// quotes so quoted paths with spaces still parse.
+#[cfg(windows)]
+fn cmd_exe_command(command: &str, args: &[String]) -> Command {
+    use std::os::windows::process::CommandExt;
+
+    let mut line = crt_quote(command);
+    for arg in args {
+        line.push(' ');
+        line.push_str(&crt_quote(arg));
+    }
+    let mut cmd = Command::new("cmd.exe");
+    cmd.args(["/D", "/S", "/C"]);
+    cmd.raw_arg(format!("\"{line}\""));
+    cmd.creation_flags(0x08000000);
+    cmd
+}
+
+fn spawn_command_with_args(command: &str, args: &[String]) -> Command {
+    #[cfg(windows)]
+    {
+        let lower = command.to_ascii_lowercase();
+        if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+            return cmd_exe_command(command, args);
+        }
+    }
+    let mut cmd = Command::new(command);
+    cmd.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
+fn probe_command(path: &Path, arg: &str) -> Command {
+    #[cfg(windows)]
+    {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") {
+                let args = [arg.to_string()];
+                return cmd_exe_command(&path.to_string_lossy(), &args);
+            }
+        }
+    }
+    let mut cmd = Command::new(path);
+    cmd.arg(arg);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
 /// Off the main thread: fork/exec, and `apply_gui_env` can wait on the first
 /// login-shell read. Callers await this before writing to the child. Kill can
 /// still race the fork, so a cancelled spawn must not reinsert the child.
@@ -338,9 +428,8 @@ pub fn harness_spawn(
         ));
     }
 
-    let mut cmd = Command::new(&command);
-    cmd.args(&args)
-        .current_dir(&workdir)
+    let mut cmd = spawn_command_with_args(&command, &args);
+    cmd.current_dir(&workdir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -658,7 +747,16 @@ fn is_resolved_harness_binary(command: &str) -> bool {
     ]
     .into_iter()
     .flatten()
-    .any(|resolved| resolved == path)
+    .any(|resolved| {
+        #[cfg(windows)]
+        {
+            resolved == path || resolved.to_string_lossy().eq_ignore_ascii_case(&path.to_string_lossy())
+        }
+        #[cfg(not(windows))]
+        {
+            resolved == path
+        }
+    })
 }
 
 /// One-shot capture of stdout (used for `cursor-agent --list-models`).
@@ -682,9 +780,8 @@ pub async fn harness_exec(
 }
 
 fn exec_capture(command: &str, args: &[String], cwd: Option<&str>) -> Result<String, String> {
-    let mut cmd = Command::new(command);
-    cmd.args(args)
-        .stdin(Stdio::null())
+    let mut cmd = spawn_command_with_args(command, args);
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     prepare_child(&mut cmd, command);
@@ -728,8 +825,7 @@ const KILL_ALL_GRACE: Duration = Duration::from_millis(300);
 const KILL_ALL_KILL_WAIT: Duration = Duration::from_millis(150);
 const HARNESS_PARENT_ENV: &str = "MONOCODE_HARNESS_PARENT";
 
-/// An interactive shell has to source the user's whole rc file; nvm alone can
-/// take a second.
+#[cfg(not(windows))]
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A spawn that was cancelled mid-fork. The session it was starting is already
@@ -747,9 +843,15 @@ fn isolate_child(cmd: &mut Command) {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
-fn terminate(pid: u32) {
+pub(crate) fn terminate(pid: u32) {
     terminate_after(pid, KILL_ESCALATE);
 }
 
@@ -825,7 +927,17 @@ fn signal_tree(pid: u32, signal: TreeSignal) {
             libc::kill(ipid, sig);
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let _ = signal;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = signal;
         let _ = Command::new("kill").arg(pid.to_string()).status();
@@ -838,13 +950,18 @@ fn tree_alive(pid: u32) -> bool {
         let ipid = pid as i32;
         unsafe { libc::kill(ipid, 0) == 0 || libc::kill(-ipid, 0) == 0 }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows_process_alive(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false
     }
 }
 
+#[allow(dead_code)]
 fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -853,13 +970,38 @@ fn process_alive(pid: u32) -> bool {
     {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows_process_alive(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false
     }
 }
 
+#[cfg(windows)]
+#[allow(dead_code)]
+fn windows_process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let success = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        success != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(any(unix, test))]
 #[derive(Debug, Clone)]
 struct ProcessSnapshot {
     pid: u32,
@@ -881,6 +1023,8 @@ pub(crate) fn reap_orphaned_harness_processes() {
     }
 }
 
+#[cfg(any(unix, test))]
+#[cfg_attr(not(unix), allow(dead_code))]
 fn reap_snapshots(rows: &[ProcessSnapshot], our_pid: u32) {
     let pids: Vec<u32> = rows
         .iter()
@@ -890,6 +1034,7 @@ fn reap_snapshots(rows: &[ProcessSnapshot], our_pid: u32) {
     terminate_all(&pids);
 }
 
+#[cfg(any(unix, test))]
 fn should_reap_process(
     proc: &ProcessSnapshot,
     our_pid: u32,
@@ -905,6 +1050,7 @@ fn should_reap_process(
 }
 
 /// Pre-marker leftovers: `cursor-agent acp` reparented to launchd.
+#[cfg(any(unix, test))]
 fn is_legacy_orphaned_cursor_acp(args: &str) -> bool {
     if !args.contains("cursor-agent") {
         return false;
@@ -915,6 +1061,7 @@ fn is_legacy_orphaned_cursor_acp(args: &str) -> bool {
 /// Argv of an agent CLI we spawned — not a shell, tmux, or `npm start`.
 /// Used to decide whose environment is worth opening; the marker still
 /// decides what actually dies.
+#[cfg(any(unix, test))]
 fn looks_like_harness_argv(args: &str) -> bool {
     if is_legacy_orphaned_cursor_acp(args) {
         return true;
@@ -922,6 +1069,7 @@ fn looks_like_harness_argv(args: &str) -> bool {
     args.split_whitespace().any(is_harness_argv_token)
 }
 
+#[cfg(any(unix, test))]
 fn is_harness_argv_token(part: &str) -> bool {
     let name = Path::new(part)
         .file_name()
@@ -943,7 +1091,7 @@ fn is_harness_argv_token(part: &str) -> bool {
     )
 }
 
-#[cfg(any(not(target_os = "linux"), test))]
+#[cfg(any(target_os = "macos", test))]
 fn parse_ps_row(line: &str) -> Option<ProcessSnapshot> {
     let s = line.trim();
     let pid_end = s.find(char::is_whitespace)?;
@@ -963,6 +1111,7 @@ fn parse_ps_row(line: &str) -> Option<ProcessSnapshot> {
     })
 }
 
+#[cfg(any(unix, test))]
 fn harness_parent_from_bytes(buf: &[u8]) -> Option<u32> {
     let mut needle = Vec::with_capacity(HARNESS_PARENT_ENV.len() + 1);
     needle.extend_from_slice(HARNESS_PARENT_ENV.as_bytes());
@@ -1102,7 +1251,7 @@ fn read_harness_parents(pids: &[u32]) -> HashMap<u32, u32> {
     found
 }
 
-#[cfg(any(not(target_os = "linux"), test))]
+#[cfg(any(target_os = "macos", test))]
 fn parse_ps_pid_command(line: &str) -> Option<(u32, String)> {
     let s = line.trim();
     let pid_end = s.find(char::is_whitespace)?;
@@ -1151,12 +1300,32 @@ fn resolve_cursor_agent() -> Option<PathBuf> {
         candidates.push(home.join(".local/bin/cursor-agent"));
         candidates.push(home.join(".local/bin/agent"));
         candidates.push(home.join(".cargo/bin/cursor-agent"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".cargo/bin/cursor-agent.exe"));
+            candidates.push(home.join(".local/bin/cursor-agent.exe"));
+            candidates.push(home.join(".local/bin/cursor-agent.cmd"));
+        }
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/usr/local/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/usr/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/snap/bin/cursor-agent"));
+    #[cfg(windows)]
+    {
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            candidates.push(local.join("Programs").join("cursor-agent").join("cursor-agent.exe"));
+            candidates.push(local.join("cursor-agent").join("cursor-agent.exe"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/cursor-agent"));
+        candidates.push(PathBuf::from("/usr/local/bin/cursor-agent"));
+        candidates.push(PathBuf::from("/usr/bin/cursor-agent"));
+        candidates.push(PathBuf::from("/snap/bin/cursor-agent"));
+    }
     if let Some(from_shell) = which_via_login_shell("cursor-agent") {
+        candidates.push(from_shell);
+    }
+    if let Some(from_shell) = which_via_login_shell("agent") {
         candidates.push(from_shell);
     }
 
@@ -1172,11 +1341,33 @@ fn resolve_codex() -> Option<PathBuf> {
         candidates.push(home.join(".npm-global/bin/codex"));
         candidates.push(home.join(".cargo/bin/codex"));
         candidates.push(home.join("n/bin/codex"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".cargo/bin/codex.exe"));
+            candidates.push(home.join(".local/bin/codex.exe"));
+            candidates.push(home.join(".local/bin/codex.cmd"));
+        }
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
-    candidates.push(PathBuf::from("/usr/local/bin/codex"));
-    candidates.push(PathBuf::from("/usr/bin/codex"));
-    candidates.push(PathBuf::from("/snap/bin/codex"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("codex.cmd"));
+            candidates.push(app.join("npm").join("codex.exe"));
+            candidates.push(app.join("npm").join("codex"));
+        }
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            candidates.push(local.join("Programs").join("codex").join("codex.exe"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
+        candidates.push(PathBuf::from("/usr/local/bin/codex"));
+        candidates.push(PathBuf::from("/usr/bin/codex"));
+        candidates.push(PathBuf::from("/snap/bin/codex"));
+    }
     if let Some(from_shell) = which_via_login_shell("codex") {
         candidates.push(from_shell);
     }
@@ -1184,12 +1375,15 @@ fn resolve_codex() -> Option<PathBuf> {
     // Last resort: the Codex app bundles its own CLI, but never puts it on
     // PATH. It is pinned to the app release (often a prerelease), so a real
     // CLI install always wins.
-    if let Some(home) = &home {
-        candidates.push(home.join("Applications/Codex.app/Contents/Resources/codex"));
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = &home {
+            candidates.push(home.join("Applications/Codex.app/Contents/Resources/codex"));
+        }
+        candidates.push(PathBuf::from(
+            "/Applications/Codex.app/Contents/Resources/codex",
+        ));
     }
-    candidates.push(PathBuf::from(
-        "/Applications/Codex.app/Contents/Resources/codex",
-    ));
 
     candidates.into_iter().find(|path| path.is_file())
 }
@@ -1204,11 +1398,33 @@ fn resolve_opencode() -> Option<PathBuf> {
         candidates.push(home.join(".npm-global/bin/opencode"));
         candidates.push(home.join(".cargo/bin/opencode"));
         candidates.push(home.join("n/bin/opencode"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".cargo/bin/opencode.exe"));
+            candidates.push(home.join(".local/bin/opencode.exe"));
+            candidates.push(home.join(".local/bin/opencode.cmd"));
+        }
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/opencode"));
-    candidates.push(PathBuf::from("/usr/local/bin/opencode"));
-    candidates.push(PathBuf::from("/usr/bin/opencode"));
-    candidates.push(PathBuf::from("/snap/bin/opencode"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("opencode.cmd"));
+            candidates.push(app.join("npm").join("opencode.exe"));
+            candidates.push(app.join("npm").join("opencode"));
+        }
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            candidates.push(local.join("Programs").join("opencode").join("opencode.exe"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/opencode"));
+        candidates.push(PathBuf::from("/usr/local/bin/opencode"));
+        candidates.push(PathBuf::from("/usr/bin/opencode"));
+        candidates.push(PathBuf::from("/snap/bin/opencode"));
+    }
     if let Some(from_shell) = which_via_login_shell("opencode") {
         candidates.push(from_shell);
     }
@@ -1227,11 +1443,33 @@ fn resolve_claude() -> Option<PathBuf> {
         candidates.push(home.join(".npm-global/bin/claude"));
         candidates.push(home.join(".cargo/bin/claude"));
         candidates.push(home.join("n/bin/claude"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".cargo/bin/claude.exe"));
+            candidates.push(home.join(".local/bin/claude.exe"));
+            candidates.push(home.join(".local/bin/claude.cmd"));
+        }
     }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
-    candidates.push(PathBuf::from("/usr/local/bin/claude"));
-    candidates.push(PathBuf::from("/usr/bin/claude"));
-    candidates.push(PathBuf::from("/snap/bin/claude"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("claude.cmd"));
+            candidates.push(app.join("npm").join("claude.exe"));
+            candidates.push(app.join("npm").join("claude"));
+        }
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            candidates.push(local.join("Programs").join("claude").join("claude.exe"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
+        candidates.push(PathBuf::from("/usr/local/bin/claude"));
+        candidates.push(PathBuf::from("/usr/bin/claude"));
+        candidates.push(PathBuf::from("/snap/bin/claude"));
+    }
     if let Some(from_shell) = which_via_login_shell("claude") {
         candidates.push(from_shell);
     }
@@ -1249,14 +1487,34 @@ fn resolve_pi() -> Option<PathBuf> {
             candidates.push(home.join(".npm-global/bin").join(name));
             candidates.push(home.join(".cargo/bin").join(name));
             candidates.push(home.join("n/bin").join(name));
+            #[cfg(windows)]
+            {
+                candidates.push(home.join(".cargo/bin").join(format!("{name}.exe")));
+                candidates.push(home.join(".local/bin").join(format!("{name}.exe")));
+                candidates.push(home.join(".local/bin").join(format!("{name}.cmd")));
+            }
         }
     }
-    for name in ["pi-coding-agent", "pi"] {
-        #[cfg(target_os = "macos")]
-        candidates.push(PathBuf::from("/opt/homebrew/bin").join(name));
-        candidates.push(PathBuf::from("/usr/local/bin").join(name));
-        candidates.push(PathBuf::from("/usr/bin").join(name));
-        candidates.push(PathBuf::from("/snap/bin").join(name));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            for name in ["pi-coding-agent", "pi"] {
+                candidates.push(app.join("npm").join(format!("{name}.cmd")));
+                candidates.push(app.join("npm").join(format!("{name}.exe")));
+                candidates.push(app.join("npm").join(name));
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        for name in ["pi-coding-agent", "pi"] {
+            #[cfg(target_os = "macos")]
+            candidates.push(PathBuf::from("/opt/homebrew/bin").join(name));
+            candidates.push(PathBuf::from("/usr/local/bin").join(name));
+            candidates.push(PathBuf::from("/usr/bin").join(name));
+            candidates.push(PathBuf::from("/snap/bin").join(name));
+        }
     }
     if let Some(from_shell) = which_via_login_shell("pi-coding-agent") {
         candidates.push(from_shell);
@@ -1274,19 +1532,95 @@ fn resolve_omp() -> Option<PathBuf> {
 
     // Installer default first, then bun/brew, then anything on the login PATH.
     if let Some(home) = &home {
+        candidates.push(home.join(".omp/bin/omp"));
         candidates.push(home.join(".local/bin/omp"));
         candidates.push(home.join(".bun/bin/omp"));
         candidates.push(home.join(".npm-global/bin/omp"));
         candidates.push(home.join(".cargo/bin/omp"));
         candidates.push(home.join("n/bin/omp"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".omp/bin/omp.exe"));
+            candidates.push(home.join(".omp/bin/omp.cmd"));
+            candidates.push(home.join(".cargo/bin/omp.exe"));
+            candidates.push(home.join(".local/bin/omp.exe"));
+            candidates.push(home.join(".local/bin/omp.cmd"));
+            candidates.push(home.join(".bun/bin/omp.exe"));
+            candidates.push(home.join(".bun/bin/omp.cmd"));
+            candidates.push(home.join(".npm-global/bin/omp.cmd"));
+            candidates.push(home.join(".npm-global/bin/omp.exe"));
+            candidates.push(home.join("scoop/shims/omp.exe"));
+            candidates.push(home.join("scoop/shims/omp.cmd"));
+            candidates.push(home.join("scoop/apps/omp/current/omp.exe"));
+        }
     }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/omp"));
-    candidates.push(PathBuf::from("/usr/local/bin/omp"));
-    candidates.push(PathBuf::from("/usr/bin/omp"));
-    candidates.push(PathBuf::from("/snap/bin/omp"));
-    if let Some(from_shell) = which_via_login_shell("omp") {
-        candidates.push(from_shell);
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("omp.cmd"));
+            candidates.push(app.join("npm").join("omp.exe"));
+            candidates.push(app.join("npm").join("omp"));
+            candidates.push(app.join("Yarn").join("bin").join("omp.cmd"));
+            candidates.push(app.join("Yarn").join("bin").join("omp.exe"));
+        }
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            candidates.push(local.join("pnpm").join("omp.exe"));
+            candidates.push(local.join("pnpm").join("omp.cmd"));
+            candidates.push(local.join("pnpm").join("omp"));
+            candidates.push(local.join("Programs").join("omp").join("omp.exe"));
+            candidates.push(local.join("Programs").join("omp").join("bin").join("omp.exe"));
+            candidates.push(local.join("Microsoft").join("WinGet").join("Links").join("omp.exe"));
+            candidates.push(local.join("Yarn").join("bin").join("omp.cmd"));
+            candidates.push(local.join("Yarn").join("bin").join("omp.exe"));
+        }
+        if let Some(pnpm_home) = std::env::var_os("PNPM_HOME") {
+            let pnpm = PathBuf::from(pnpm_home);
+            candidates.push(pnpm.join("omp.exe"));
+            candidates.push(pnpm.join("omp.cmd"));
+        }
+        if let Some(cargo_home) = std::env::var_os("CARGO_HOME") {
+            let cargo = PathBuf::from(cargo_home);
+            candidates.push(cargo.join("bin").join("omp.exe"));
+        }
+        if let Some(scoop) = std::env::var_os("SCOOP") {
+            let scoop = PathBuf::from(scoop);
+            candidates.push(scoop.join("shims").join("omp.exe"));
+            candidates.push(scoop.join("shims").join("omp.cmd"));
+        }
+        if let Some(choco) = std::env::var_os("ChocolateyInstall") {
+            candidates.push(PathBuf::from(choco).join("bin").join("omp.exe"));
+        }
+        candidates.push(PathBuf::from(r"C:\ProgramData\chocolatey\bin\omp.exe"));
+        candidates.push(PathBuf::from(r"C:\ProgramData\scoop\shims\omp.exe"));
+        if let Some(prog) = std::env::var_os("ProgramFiles") {
+            let p = PathBuf::from(prog);
+            candidates.push(p.join("omp").join("omp.exe"));
+            candidates.push(p.join("omp").join("bin").join("omp.exe"));
+        }
+        if let Some(prog86) = std::env::var_os("ProgramFiles(x86)") {
+            let p = PathBuf::from(prog86);
+            candidates.push(p.join("omp").join("omp.exe"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "macos")]
+        candidates.push(PathBuf::from("/opt/homebrew/bin/omp"));
+        candidates.push(PathBuf::from("/usr/local/bin/omp"));
+        candidates.push(PathBuf::from("/usr/bin/omp"));
+        candidates.push(PathBuf::from("/snap/bin/omp"));
+    }
+    for from_shell in which_all_via_login_shell("omp") {
+        if !candidates.contains(&from_shell) {
+            candidates.push(from_shell);
+        }
+    }
+    for from_gui in which_all_in_path(&gui_search_path(), "omp") {
+        if !candidates.contains(&from_gui) {
+            candidates.push(from_gui);
+        }
     }
 
     candidates.into_iter().find(|path| is_omp_agent(path))
@@ -1299,8 +1633,8 @@ fn is_omp_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "omp" {
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    if !stem.eq_ignore_ascii_case("omp") {
         return false;
     }
     help_mentions_rpc_mode(path)
@@ -1317,12 +1651,30 @@ fn resolve_fx() -> Option<PathBuf> {
         candidates.push(home.join(".npm-global/bin/fx"));
         candidates.push(home.join(".cargo/bin/fx"));
         candidates.push(home.join("n/bin/fx"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".cargo/bin/fx.exe"));
+            candidates.push(home.join(".local/bin/fx.exe"));
+            candidates.push(home.join(".local/bin/fx.cmd"));
+        }
     }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/fx"));
-    candidates.push(PathBuf::from("/usr/local/bin/fx"));
-    candidates.push(PathBuf::from("/usr/bin/fx"));
-    candidates.push(PathBuf::from("/snap/bin/fx"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("fx.cmd"));
+            candidates.push(app.join("npm").join("fx.exe"));
+            candidates.push(app.join("npm").join("fx"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "macos")]
+        candidates.push(PathBuf::from("/opt/homebrew/bin/fx"));
+        candidates.push(PathBuf::from("/usr/local/bin/fx"));
+        candidates.push(PathBuf::from("/usr/bin/fx"));
+        candidates.push(PathBuf::from("/snap/bin/fx"));
+    }
     if let Some(from_shell) = which_via_login_shell("fx") {
         candidates.push(from_shell);
     }
@@ -1340,12 +1692,32 @@ fn resolve_grok() -> Option<PathBuf> {
         candidates.push(home.join(".npm-global/bin/grok"));
         candidates.push(home.join(".cargo/bin/grok"));
         candidates.push(home.join("n/bin/grok"));
+        #[cfg(windows)]
+        {
+            candidates.push(home.join(".grok/bin/grok.exe"));
+            candidates.push(home.join(".grok/bin/grok.cmd"));
+            candidates.push(home.join(".cargo/bin/grok.exe"));
+            candidates.push(home.join(".local/bin/grok.exe"));
+            candidates.push(home.join(".local/bin/grok.cmd"));
+        }
     }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/grok"));
-    candidates.push(PathBuf::from("/usr/local/bin/grok"));
-    candidates.push(PathBuf::from("/usr/bin/grok"));
-    candidates.push(PathBuf::from("/snap/bin/grok"));
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            candidates.push(app.join("npm").join("grok.cmd"));
+            candidates.push(app.join("npm").join("grok.exe"));
+            candidates.push(app.join("npm").join("grok"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "macos")]
+        candidates.push(PathBuf::from("/opt/homebrew/bin/grok"));
+        candidates.push(PathBuf::from("/usr/local/bin/grok"));
+        candidates.push(PathBuf::from("/usr/bin/grok"));
+        candidates.push(PathBuf::from("/snap/bin/grok"));
+    }
     if let Some(from_shell) = which_via_login_shell("grok") {
         candidates.push(from_shell);
     }
@@ -1357,11 +1729,11 @@ fn is_pi_coding_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "pi" && name != "pi-coding-agent" {
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    if stem != "pi" && stem != "pi-coding-agent" {
         return false;
     }
-    if name == "pi-coding-agent" {
+    if stem == "pi-coding-agent" {
         return true;
     }
     file_mentions_pi_coding_agent(path) || help_mentions_rpc_mode(path)
@@ -1383,9 +1755,8 @@ fn file_mentions_pi_coding_agent(path: &Path) -> bool {
 }
 
 fn help_mentions_rpc_mode(path: &Path) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--help")
-        .stdin(Stdio::null())
+    let mut cmd = probe_command(path, "--help");
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // npm-installed harnesses are `#!/usr/bin/env node` scripts, so this probe
@@ -1400,7 +1771,7 @@ fn help_mentions_rpc_mode(path: &Path) -> bool {
     thread::spawn(move || {
         let _ = tx.send(child.wait_with_output());
     });
-    match rx.recv_timeout(Duration::from_secs(2)) {
+    match rx.recv_timeout(Duration::from_secs(3)) {
         Ok(Ok(output)) => {
             let text = format!(
                 "{}{}",
@@ -1408,7 +1779,12 @@ fn help_mentions_rpc_mode(path: &Path) -> bool {
                 String::from_utf8_lossy(&output.stderr)
             )
             .to_ascii_lowercase();
-            text.contains("--mode") && text.contains("rpc")
+            text.contains("rpc")
+                && (text.contains("--mode")
+                    || text.contains("rpc-ui")
+                    || text.contains("oh-my-pi")
+                    || text.contains("pi-coding-agent")
+                    || text.contains("mode:"))
         }
         _ => {
             terminate(pid);
@@ -1421,8 +1797,8 @@ fn is_fx_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "fx" {
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    if stem != "fx" {
         return false;
     }
     file_mentions_fx_agent(path) || fx_help_mentions_acp(path)
@@ -1432,12 +1808,13 @@ fn is_grok_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "grok" {
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    if stem != "grok" {
         return false;
     }
+    let path_str = path.to_string_lossy();
     // Official installer: ~/.grok/bin/grok
-    if path.to_string_lossy().contains("/.grok/") {
+    if path_str.contains("/.grok/") || path_str.contains("\\.grok\\") {
         return true;
     }
     file_mentions_grok_agent(path) || grok_help_mentions_agent(path)
@@ -1476,9 +1853,8 @@ fn file_mentions_fx_agent(path: &Path) -> bool {
 }
 
 fn fx_help_mentions_acp(path: &Path) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--help")
-        .stdin(Stdio::null())
+    let mut cmd = probe_command(path, "--help");
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // npm-installed harnesses are `#!/usr/bin/env node` scripts, so this probe
@@ -1539,9 +1915,8 @@ fn file_mentions_grok_agent(path: &Path) -> bool {
 }
 
 fn grok_help_mentions_agent(path: &Path) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--help")
-        .stdin(Stdio::null())
+    let mut cmd = probe_command(path, "--help");
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_gui_env(&mut cmd);
@@ -1576,14 +1951,14 @@ fn is_cursor_agent(path: &Path) -> bool {
         return false;
     }
     let text = path.to_string_lossy();
-    if text.contains("/.grok/") {
+    if text.contains("/.grok/") || text.contains("\\.grok\\") {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name == "cursor-agent" {
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+    if stem == "cursor-agent" {
         return true;
     }
-    if name == "agent" {
+    if stem == "agent" {
         // One symlink hop. canonicalize() can walk into another .app
         // and trip macOS "data from other apps" TCC.
         if let Ok(target) = std::fs::read_link(path) {
@@ -1606,11 +1981,65 @@ fn which_via_login_shell(name: &str) -> Option<PathBuf> {
     which_in_path(&login_shell_path()?, name)
 }
 
+fn which_all_via_login_shell(name: &str) -> Vec<PathBuf> {
+    login_shell_path()
+        .map(|p| which_all_in_path(&p, name))
+        .unwrap_or_default()
+}
+
 fn which_in_path(path: &str, name: &str) -> Option<PathBuf> {
-    path.split(':')
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| Path::new(dir).join(name))
-        .find(|candidate| is_executable_file(candidate))
+    #[cfg(windows)]
+    // `.exe` first, matching PATHEXT; no `.ps1` — CreateProcess can't run it
+    // and nothing here wraps it in a PowerShell host.
+    let extensions = [".exe", ".cmd", ".bat", ""];
+    #[cfg(not(windows))]
+    let extensions = [""];
+
+    for dir in std::env::split_paths(path) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for ext in extensions {
+            let candidate = if ext.is_empty() {
+                dir.join(name)
+            } else if name.ends_with(ext) {
+                dir.join(name)
+            } else {
+                dir.join(format!("{name}{ext}"))
+            };
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn which_all_in_path(path: &str, name: &str) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    let extensions = [".exe", ".cmd", ".bat", ""];
+    #[cfg(not(windows))]
+    let extensions = [""];
+
+    let mut results = Vec::new();
+    for dir in std::env::split_paths(path) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for ext in extensions {
+            let candidate = if ext.is_empty() {
+                dir.join(name)
+            } else if name.ends_with(ext) {
+                dir.join(name)
+            } else {
+                dir.join(format!("{name}{ext}"))
+            };
+            if is_executable_file(&candidate) && !results.contains(&candidate) {
+                results.push(candidate);
+            }
+        }
+    }
+    results
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -1643,30 +2072,74 @@ fn gui_search_path_from(
     home: Option<String>,
     existing: Option<String>,
 ) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<PathBuf> = Vec::new();
     // Login-shell PATH first so Homebrew, mise, nvm, and custom dirs match
     // the user's terminal. The fixed list is a fallback when that read fails.
     if let Some(path) = login_path {
-        parts.push(path);
+        for p in std::env::split_paths(&path) {
+            parts.push(p);
+        }
     }
-    if let Some(home) = home {
-        parts.push(format!("{home}/.local/bin"));
-        parts.push(format!("{home}/.cargo/bin"));
-        parts.push(format!("{home}/.claude/local"));
-        parts.push(format!("{home}/.local/share/claude"));
-        parts.push(format!("{home}/.opencode/bin"));
-        parts.push(format!("{home}/.grok/bin"));
-        parts.push(format!("{home}/.npm-global/bin"));
+    if let Some(home) = &home {
+        let home_path = PathBuf::from(home);
+        parts.push(home_path.join(".local/bin"));
+        parts.push(home_path.join(".cargo/bin"));
+        parts.push(home_path.join(".claude/local"));
+        parts.push(home_path.join(".local/share/claude"));
+        parts.push(home_path.join(".opencode/bin"));
+        parts.push(home_path.join(".grok/bin"));
+        parts.push(home_path.join(".npm-global/bin"));
     }
-    parts.push("/opt/homebrew/bin".into());
-    parts.push("/usr/local/bin".into());
-    parts.push("/usr/bin".into());
-    parts.push("/bin".into());
-    parts.push("/snap/bin".into());
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let app = PathBuf::from(appdata);
+            parts.push(app.join("npm"));
+            parts.push(app.join("Yarn").join("bin"));
+        }
+        if let Some(localappdata) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(localappdata);
+            parts.push(local.join("Programs"));
+            parts.push(local.join("Microsoft").join("WindowsApps"));
+            parts.push(local.join("pnpm"));
+            parts.push(local.join("Programs").join("omp"));
+            parts.push(local.join("Programs").join("omp").join("bin"));
+            parts.push(local.join("Microsoft").join("WinGet").join("Links"));
+            parts.push(local.join("Yarn").join("bin"));
+        }
+        if let Some(pnpm_home) = std::env::var_os("PNPM_HOME") {
+            parts.push(PathBuf::from(pnpm_home));
+        }
+        if let Some(home) = &home {
+            let home_path = PathBuf::from(home);
+            parts.push(home_path.join(".omp").join("bin"));
+            parts.push(home_path.join("scoop").join("shims"));
+        }
+        if let Some(scoop) = std::env::var_os("SCOOP") {
+            parts.push(PathBuf::from(scoop).join("shims"));
+        }
+        if let Some(choco) = std::env::var_os("ChocolateyInstall") {
+            parts.push(PathBuf::from(choco).join("bin"));
+        }
+        parts.push(PathBuf::from(r"C:\ProgramData\chocolatey\bin"));
+        parts.push(PathBuf::from(r"C:\ProgramData\scoop\shims"));
+    }
+    #[cfg(unix)]
+    {
+        parts.push(PathBuf::from("/opt/homebrew/bin"));
+        parts.push(PathBuf::from("/usr/local/bin"));
+        parts.push(PathBuf::from("/usr/bin"));
+        parts.push(PathBuf::from("/bin"));
+        parts.push(PathBuf::from("/snap/bin"));
+    }
     if let Some(existing) = existing {
-        parts.push(existing);
+        for p in std::env::split_paths(&existing) {
+            parts.push(p);
+        }
     }
-    parts.join(":")
+    std::env::join_paths(parts)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn apply_gui_path(cmd: &mut Command) {
@@ -1738,8 +2211,7 @@ fn apply_grok_env(cmd: &mut Command) {
 
 static LOGIN_SHELL_ENV: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-/// Keys worth keeping out of `printenv`. PATH is the important one: a
-/// Finder-launched app inherits only launchd's bare PATH.
+#[cfg(not(windows))]
 const LOGIN_SHELL_KEYS: [&str; 6] = [
     "PATH",
     "AI_GATEWAY_API_KEY",
@@ -1770,6 +2242,12 @@ fn login_shell_env(name: &str) -> Option<String> {
 /// version managers (nvm, fnm, mise, volta) all initialize from there. A
 /// login-but-not-interactive shell sees `.zshenv`/`.zprofile` only, so every
 /// nvm-managed CLI looks uninstalled.
+#[cfg(windows)]
+fn load_login_shell_env() -> HashMap<String, String> {
+    std::env::vars().collect()
+}
+
+#[cfg(not(windows))]
 fn load_login_shell_env() -> HashMap<String, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| {
         if cfg!(target_os = "macos") {
@@ -1813,7 +2291,7 @@ fn load_login_shell_env() -> HashMap<String, String> {
 
 fn command_basename(command: &str) -> &str {
     Path::new(command)
-        .file_name()
+        .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or(command)
 }
@@ -2218,9 +2696,27 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(is_omp_agent(&agent));
         }
-        #[cfg(unix)]
-        assert!(is_omp_agent(&agent));
+
+        #[cfg(windows)]
+        {
+            let win_agent = dir.join("omp.cmd");
+            std::fs::write(
+                &win_agent,
+                b"@echo off\r\necho --mode=^<value^> Output mode: text, json, rpc, or rpc-ui\r\n",
+            )
+            .unwrap();
+            assert!(is_omp_agent(&win_agent));
+
+            let win_posh = dir.join("omp_fake_posh.cmd");
+            std::fs::write(
+                &win_posh,
+                b"@echo off\r\necho prompt theme engine\r\n",
+            )
+            .unwrap();
+            assert!(!is_omp_agent(&win_posh));
+        }
 
         // oh-my-posh and friends must not win the name.
         let other = dir.join("oh-my-posh");
@@ -2474,5 +2970,87 @@ mod reap_logic_tests {
         assert!(!is_legacy_orphaned_cursor_acp(
             "node /usr/local/bin/typescript-language-server --stdio"
         ));
+    }
+}
+
+#[cfg(test)]
+mod omp_tests {
+    use super::*;
+
+    #[test]
+    fn omp_accepts_rpc_mode_and_rejects_other_binaries() {
+        let dir = std::env::temp_dir().join(format!("monocode-omp-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        #[cfg(windows)]
+        {
+            let agent = dir.join("omp.cmd");
+            std::fs::write(
+                &agent,
+                b"@echo off\r\necho --mode=^<value^> Output mode: text, json, rpc, or rpc-ui\r\n",
+            )
+            .unwrap();
+            assert!(is_omp_agent(&agent));
+
+            // Upper case stem
+            let upper = dir.join("OMP.cmd");
+            assert!(is_omp_agent(&upper));
+
+            // Oh-my-posh prompt theme engine should not match
+            let posh = dir.join("omp_other.cmd");
+            std::fs::write(&posh, b"@echo off\r\necho prompt theme engine\r\n").unwrap();
+            assert!(!is_omp_agent(&posh));
+
+            let posh_named_omp = dir.join("oh-my-posh.cmd");
+            std::fs::write(
+                &posh_named_omp,
+                b"@echo off\r\necho prompt theme engine\r\n",
+            )
+            .unwrap();
+            assert!(!is_omp_agent(&posh_named_omp));
+
+            // which_all_in_path finds the batch script
+            let all = which_all_in_path(&dir.to_string_lossy(), "omp");
+            assert!(all.contains(&agent));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let agent = dir.join("omp");
+            std::fs::write(
+                &agent,
+                b"#!/bin/sh\necho '--mode=<value> Output mode: text, json, rpc, or rpc-ui'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(is_omp_agent(&agent));
+        }
+
+        assert!(!is_omp_agent(&dir.join("nonexistent_omp_file")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn which_all_in_path_finds_all_matching_executables() {
+        let dir = std::env::temp_dir().join(format!("monocode-which-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        #[cfg(windows)]
+        {
+            let exe1 = dir.join("mytool.exe");
+            let cmd1 = dir.join("mytool.cmd");
+            std::fs::write(&exe1, b"").unwrap();
+            std::fs::write(&cmd1, b"").unwrap();
+
+            let found = which_all_in_path(&dir.to_string_lossy(), "mytool");
+            assert_eq!(found.len(), 2);
+            assert!(found.contains(&exe1));
+            assert!(found.contains(&cmd1));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

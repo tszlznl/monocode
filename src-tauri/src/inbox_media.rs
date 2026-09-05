@@ -265,6 +265,11 @@ fn github_auth_token() -> Option<String> {
     let program = crate::harness::resolve_gui_binary("gh")?;
     let home = dirs_home()?;
     let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
     cmd.current_dir(&home)
         .args(["auth", "token"])
         .env("GIT_TERMINAL_PROMPT", "0")

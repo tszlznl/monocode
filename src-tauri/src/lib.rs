@@ -49,6 +49,23 @@ pub(crate) fn dirs_home() -> Option<String> {
             return Some(home);
         }
     }
+    #[cfg(windows)]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            let profile = profile.to_string_lossy().into_owned();
+            if !profile.is_empty() {
+                return Some(profile);
+            }
+        }
+        if let (Some(drive), Some(path)) =
+            (std::env::var_os("HOMEDRIVE"), std::env::var_os("HOMEPATH"))
+        {
+            let combined = format!("{}{}", drive.to_string_lossy(), path.to_string_lossy());
+            if !combined.is_empty() {
+                return Some(combined);
+            }
+        }
+    }
     passwd_identity().map(|id| id.home)
 }
 
@@ -89,7 +106,27 @@ pub(crate) fn passwd_identity() -> Option<PasswdIdentity> {
             Some(PasswdIdentity { home, user, shell })
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let home = if let Some(home) = std::env::var_os("HOME") {
+            let h = home.to_string_lossy().into_owned();
+            if !h.is_empty() {
+                h
+            } else if let Some(p) = std::env::var_os("USERPROFILE") {
+                p.to_string_lossy().into_owned()
+            } else {
+                return None;
+            }
+        } else if let Some(p) = std::env::var_os("USERPROFILE") {
+            p.to_string_lossy().into_owned()
+        } else {
+            return None;
+        };
+        let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into());
+        Some(PasswdIdentity { home, user, shell })
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         None
     }

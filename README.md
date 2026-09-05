@@ -32,6 +32,8 @@ macOS (Apple Silicon): download [MonoCode.dmg](https://dl.usemono.dev/MonoCode.d
 
 Linux (x86_64): download the `.deb` or AppImage from [GitHub Releases](https://github.com/hardbeat920/monocode/releases/latest). Install the `.deb` with `sudo apt install ./MonoCode_*.deb`, or make the AppImage executable with `chmod +x MonoCode_*.AppImage` and run it directly.
 
+Windows (x86_64): download the NSIS installer from [GitHub Releases](https://github.com/hardbeat920/monocode/releases/latest). Run the installer to install MonoCode.
+
 ## Some notes
 
 This is very early and you should expect bugs.
@@ -40,14 +42,24 @@ Small, focused pull requests are welcome. Anything large is worth an issue first
 
 ## Build from source
 
-Supports macOS and Linux.
+Supports macOS, Linux, and Windows.
 
-Need Node.js 20+ and a current stable Rust toolchain. On Linux, ensure standard Tauri prerequisites are installed (e.g. `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`).
+Need Node.js 20+ and a current stable Rust toolchain. On Linux, ensure standard Tauri prerequisites are installed (e.g. `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`). On Windows, ensure the WebView2 runtime (pre-installed on Windows 10/11) and C++ build tools (MSVC or MinGW GCC) are available.
 
 ```bash
 npm install
 npm run tauri dev
 ```
+
+### Windows build & packages
+
+```powershell
+npm install
+npm run build:windows
+```
+
+The Windows build emits an NSIS installer bundle under `target/release/bundle/nsis/`.
+Tauri loads `src-tauri/tauri.windows.conf.json` for custom frameless window styling and Windows packaging.
 
 ### Ubuntu / Debian packages
 
